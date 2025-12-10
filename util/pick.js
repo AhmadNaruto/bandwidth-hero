@@ -1,12 +1,18 @@
-// Since only single function required from lodash or underscore, writing it self
+// util/pick.js - FIX: No assignment in expression
 
 // Picks specific properties from an object
 module.exports = (object, properties) => {
-  let picked = {};
-  for (let key in object || (object = {})) {
-    if (Object.hasOwnProperty.call(object, key) && properties.includes(key)) {
-      picked[key] = object[key];
-    }
-  }
-  return picked;
+	const picked = {};
+    
+    // Pastikan objek yang diiterasi bukan null atau undefined.
+    // Gunakan objek kosong ({}) sebagai fallback.
+	const targetObject = object || {}; 
+
+	for (const key in targetObject) {
+        // Gunakan targetObject di dalam loop
+		if (Object.hasOwn(targetObject, key) && properties.includes(key)) {
+			picked[key] = targetObject[key];
+		}
+	}
+	return picked;
 };
