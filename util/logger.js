@@ -1,176 +1,206 @@
 /**
- * Modern structured logger for bandwidth-hero compression service
- * Provides clean, structured logging of the compression process
+ * logger.js - OPTIMIZED: Structured logging with improved error handling and performance
  */
+
+// Log level configuration
+const LOG_LEVELS = {
+    ERROR: 0,
+    WARN: 1,
+    INFO: 2,
+    DEBUG: 3,
+    TRACE: 4
+};
+
+// Log level names for output
+const LEVEL_NAMES = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+
 class Logger {
-	constructor(level = "info", enabled = true) {
-		this.level = level;
-		this.enabled = enabled;
-		this.levels = {
-			error: 0,
-			warn: 1,
-			info: 2,
-			debug: 3,
-			trace: 4,
-		};
-	}
-	bytesToMB(bytes, decimals = 1) {
-		bytes === 0
-			? "0MB"
-			: `${parseFloat((bytes / (1024 * 1024)).toFixed(decimals))}MB`;
-	}
+    constructor(level = 'INFO', enabled = true) {
+        this.level = level.toUpperCase();
+        this.enabled = enabled;
+        this.currentLevel = LOG_LEVELS[this.level] || LOG_LEVELS.INFO;
+    }
 
-	isEnabled(level) {
-		return this.enabled && this.levels[level] <= this.levels[this.level];
-	}
+    /**
+     * Convert bytes to human-readable format
+     */
+    formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+        
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
+    }
 
-	_log(level, message, meta = {}) {
-		if (!this.isEnabled(level)) return;
+    /**
+     * Check if logging is enabled for a specific level
+     */
+    isEnabled(level) {
+        return this.enabled && LOG_LEVELS[level] <= this.currentLevel;
+    }
 
-		const timestamp = new Date().toISOString();
-		const logEntry = {
-			timestamp,
-			level,
-			message,
-			...meta,
-		};
+    /**
+     * Core logging method
+     */
+    _log(level, message, metadata = {}) {
+        if (!this.isEnabled(level)) return;
 
-		console.log(JSON.stringify(logEntry));
-	}
+        const timestamp = new Date().toISOString();
+        const logEntry = {
+            timestamp,
+            level: level.toUpperCase(),
+            message,
+            ...metadata
+        };
 
-	error(message, meta = {}) {
-		this._log("error", message, meta);
-	}
+        console.log(JSON.stringify(logEntry));
+    }
 
-	warn(message, meta = {}) {
-		this._log("warn", message, meta);
-	}
+    // Public logging methods
+    error(message, metadata = {}) {
+        this._log('ERROR', message, metadata);
+    }
 
-	info(message, meta = {}) {
-		this._log("info", message, meta);
-	}
+    warn(message, metadata = {}) {
+        this._log('WARN', message, metadata);
+    }
 
-	debug(message, meta = {}) {
-		this._log("debug", message, meta);
-	}
+    info(message, metadata = {}) {
+        this._log('INFO', message, metadata);
+    }
 
-	trace(message, meta = {}) {
-		this._log("trace", message, meta);
-	}
+    debug(message, metadata = {}) {
+        this._log('DEBUG', message, metadata);
+    }
 
-	/**
-	 * Log compression process details
-	 * ==== PERBAIKAN: Tambahkan transmittedSize untuk monitoring overhead base64 ====
-	 */
-	logCompressionProcess(details) {
-		const {
-			url,
-			// originalSize,
-			// compressedSize,
-			// format,
-			quality,
-			// grayscale,
-			// compressionRatio,
-			bytesSaved,
-			// processingTime,
-			// transmittedSize, // Ukuran base64 yang ditransmisikan
-			error = null,
-		} = details;
+    trace(message, metadata = {}) {
+        this._log('TRACE', message, metadata);
+    }
 
-		if (error) {
-			this.warn("Failed: ", {
-				url,
-				// originalSize,
-				error: error.message || error,
-				// processingTime
-			});
-		} else {
-			this.info("Success: ", {
-				// url,
-				// originalSize,
-				// compressedSize,
-				// transmittedSize, // Log ukuran aktual yang ditransmisikan
-				// format,
-				quality,
-				// grayscale,
-				// compressionRatio: parseFloat(compressionRatio.toFixed(2)),
-				bytesSaved: this.bytesToMB(bytesSaved),
-				// processingTime,
-				// overheadPercentage: transmittedSize ? ((transmittedSize - compressedSize) / compressedSize * 100).toFixed(1) : 0
-			});
-		}
-	}
+    /**
+     * Log compression process details
+     */
+    logCompressionProcess(details = {}) {
+        const {
+            url,
+            originalSize,
+            compressedSize,
+            bytesSaved,
+            quality,
+            format,
+            error = null,
+            processingTime
+        } = details;
 
-	/**
-	 * Log request details
-	 */
-	logRequest(requestDetails) {
-		const { url, userAgent, referer, ip, jpeg, bw, quality, contentType } =
-			requestDetails;
+        if (error) {
+            this.warn('Compression failed', {
+                url: url ? this.truncateUrl(url) : 'Unknown',
+                originalSize: originalSize ? this.formatBytes(originalSize) : 'Unknown',
+                error: error.message || String(error),
+                processingTime
+            });
+        } else {
+            this.info('Compression successful', {
+                originalSize: originalSize ? this.formatBytes(originalSize) : 'Unknown',
+                compressedSize: compressedSize ? this.formatBytes(compressedSize) : 'Unknown',
+                savings: bytesSaved ? this.formatBytes(bytesSaved) : 'Unknown',
+                savingsPercentage: originalSize && compressedSize ? 
+                    (((originalSize - compressedSize) / originalSize) * 100).toFixed(1) + '%' : 'Unknown',
+                quality,
+                format: format || 'Unknown',
+                processingTime
+            });
+        }
+    }
 
-		this.debug("REQUEST: ", {
-			url,
-			userAgent: `${userAgent?.substring(0, 50)}...` || "unknown", // Truncate long user agents
-			referer: referer || "direct",
-			ip: ip || "unknown",
-			options: {
-				jpeg: !!jpeg,
-				grayscale: !!bw,
-				quality: quality || 40,
-			},
-			contentType,
-		});
-	}
+    /**
+     * Log request details
+     */
+    logRequest(requestDetails = {}) {
+        const {
+            url,
+            userAgent,
+            referer,
+            ip,
+            jpeg,
+            bw,
+            quality,
+            contentType
+        } = requestDetails;
 
-	/**
-	 * Log bypass decisions
-	 */
-	logBypass(bypassDetails) {
-		const { url, size, reason } = bypassDetails;
+        this.debug('Request received', {
+            url: url ? this.truncateUrl(url) : 'Unknown',
+            client: {
+                ip: ip || 'Unknown',
+                userAgent: userAgent ? this.truncateString(userAgent, 100) : 'Unknown',
+                referer: referer || 'Direct'
+            },
+            compressionOptions: {
+                forceJpeg: !!jpeg,
+                grayscale: !!bw,
+                quality: quality || 40
+            },
+            contentType: contentType || 'Unknown'
+        });
+    }
 
-		this.info("BYPASS: ", {
-			url,
-			size,
-			// contentType,
-			reason,
-		});
-	}
+    /**
+     * Log bypass decisions
+     */
+    logBypass(bypassDetails = {}) {
+        const { url, size, reason } = bypassDetails;
 
-	/**
-	 * Log upstream fetch results
-	 */
-	logUpstreamFetch(fetchDetails) {
-		const {
-			url,
-			statusCode,
-			// contentType,
-			// contentLength,
-			//fetchTime,
-			success,
-		} = fetchDetails;
+        this.info('Bypassing compression', {
+            url: url ? this.truncateUrl(url) : 'Unknown',
+            size: size ? this.formatBytes(size) : 'Unknown',
+            reason: reason || 'Unknown'
+        });
+    }
 
-		if (success) {
-			this.debug("FETCH OK: ", {
-				url,
-				statusCode,
-				// contentType,
-				// contentLength,
-				// fetchTime,
-			});
-		} else {
-			this.warn("FETCH FAIL: ", {
-				url,
-				statusCode,
-				// fetchTime,
-			});
-		}
-	}
+    /**
+     * Log upstream fetch results
+     */
+    logUpstreamFetch(fetchDetails = {}) {
+        const {
+            url,
+            statusCode,
+            success,
+            fetchTime,
+            size
+        } = fetchDetails;
+
+        const level = success ? 'INFO' : 'WARN';
+        this._log(level, success ? 'Upstream fetch successful' : 'Upstream fetch failed', {
+            url: url ? this.truncateUrl(url) : 'Unknown',
+            statusCode: statusCode || 'Unknown',
+            size: size ? this.formatBytes(size) : 'Unknown',
+            fetchTime: fetchTime ? `${fetchTime}ms` : 'Unknown'
+        });
+    }
+
+    /**
+     * Helper: Truncate URL for logging
+     */
+    truncateUrl(url, maxLength = 100) {
+        if (!url || url.length <= maxLength) return url;
+        return url.substring(0, maxLength - 3) + '...';
+    }
+
+    /**
+     * Helper: Truncate string for logging
+     */
+    truncateString(str, maxLength = 50) {
+        if (!str || str.length <= maxLength) return str;
+        return str.substring(0, maxLength - 3) + '...';
+    }
 }
 
-// Create a global logger instance
+// Create singleton instance
 const logger = new Logger(
-	process.env.LOG_LEVEL || "info",
-	process.env.LOG_ENABLED !== "false",
+    process.env.LOG_LEVEL || 'INFO',
+    process.env.LOG_ENABLED !== 'false'
 );
 
 module.exports = logger;
