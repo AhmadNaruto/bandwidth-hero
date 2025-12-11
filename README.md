@@ -21,6 +21,22 @@ It downloads original image and transforms it with [Sharp](https://github.com/lo
 - **Performance Monitoring**: Time tracking for various operations to identify bottlenecks
 - **Cloudflare Compatibility**: Forwards browser headers to avoid detection by Cloudflare and similar services
 - **Serverless Architecture**: Deployable on Netlify Functions for cost-effective scaling
+- **Format Options**: Support for both WebP and JPEG output formats with quality adjustment capability
+- **Grayscale Conversion**: Optional grayscale conversion for images to reduce file size further
+- **Quality Control**: Adjustable quality levels (default 40) allowing control over compression ratio
+- **Intelligent Compression Logic**: Smart decision-making system that determines whether to compress images based on size, format, and user preferences
+- **Header Forwarding**: Passes through user headers (User-Agent, Accept, Accept-Language, Accept-Encoding, Cookie, DNT, Referer) to maintain authenticity of requests
+- **IP Address Preservation**: Maintains user's IP address when forwarding requests to origin hosts
+- **Bypass Logic**: Automatically bypasses compression for very small images or those that don't meet specific criteria
+- **Size Validation**: Includes checks to ensure compressed output isn't larger than original
+- **Transparency Handling**: Special handling for transparent images to determine compression appropriateness
+- **Dimension Management**: Automatic resizing with maximum width limits to optimize compression
+- **Metadata Extraction**: Safe extraction and utilization of image metadata for optimal processing
+- **Cache Management**: Proper cache headers to prevent unwanted caching of compressed images
+- **Health Checking**: Built-in health check endpoint for monitoring service availability
+- **Error Handling**: Comprehensive error handling with appropriate HTTP status codes
+- **Content Type Detection**: Accurate identification and validation of image types for appropriate processing
+- **Bandwidth Optimization**: Significant reduction in image file sizes to save bandwidth and improve load times
 
 ## Logging
 
