@@ -1,4 +1,4 @@
-// index.js - Production-ready with all fixes integrated
+// index.js - OPTIMIZED: Enhanced structure, error handling, and performance
 
 const crypto = require("node:crypto");
 const pick = require("../util/pick");
@@ -6,245 +6,269 @@ const shouldCompress = require("../util/shouldCompress");
 const compress = require("../util/compress");
 const logger = require("../util/logger");
 
+// Configuration constants
+const CONFIG = {
+    CACHE_HEADERS: {
+        "content-encoding": "identity",
+        "cache-control": "private, no-store, no-cache, must-revalidate, max-age=0",
+        pragma: "no-cache",
+        expires: "0",
+        vary: "url, jpeg, grayscale, quality"
+    },
+    BYPASS_THRESHOLD: 10240, // 10KB
+    DEFAULT_QUALITY: 40,
+    FETCH_HEADERS_TO_PICK: ["cookie", "dnt", "referer", "user-agent", "accept", "accept-language"]
+};
+
 // Helper: Generate cache-safe headers
 const getCacheHeaders = (custom = {}) => ({
-	"content-encoding": "identity",
-	"cache-control": "private, no-store, no-cache, must-revalidate, max-age=0",
-	pragma: "no-cache",
-	expires: "0",
-	vary: "url, jpeg, grayscale, quality",
-	...custom,
+    ...CONFIG.CACHE_HEADERS,
+    ...custom
 });
 
-// Main handler - HANYA SATU DEKLARASI
-exports.handler = async (event, _context) => {
-	// const startTime = Date.now();
-	// FIX: Guard clause untuk queryStringParameters undefined
-	if (!event.queryStringParameters) {
-		return {
-			statusCode: 400,
-			body: JSON.stringify({ error: "Missing query parameters" }),
-			headers: { "content-type": "application/json" },
-		};
-	}
+// Helper: Create error response
+const createErrorResponse = (statusCode, message, url = null) => {
+    const body = { error: message };
+    if (url) body.url = url;
 
-	const { url: r, jpeg: s, bw: o, l: a } = event.queryStringParameters;
+    return {
+        statusCode,
+        body: JSON.stringify(body),
+        headers: getCacheHeaders({ "content-type": "application/json" })
+    };
+};
 
-	// Health check endpoint
-	if (!r) {
-		return {
-			statusCode: 200,
-			body: "bandwidth-hero-proxy",
-			headers: getCacheHeaders(),
-		};
-	}
+// Helper: Create successful image response
+const createImageResponse = (buffer, contentType, additionalHeaders = {}, isBase64Encoded = true) => {
+    const body = isBase64Encoded ? buffer.toString("base64") : buffer;
+    
+    return {
+        statusCode: 200,
+        body,
+        isBase64Encoded,
+        headers: getCacheHeaders({
+            "content-type": contentType,
+            "content-length": Buffer.byteLength(body, isBase64Encoded ? "base64" : undefined),
+            ...additionalHeaders
+        })
+    };
+};
 
-	let imageUrl = r;
+// Helper: Parse and validate query parameters
+function parseQueryParams(queryParams) {
+    if (!queryParams) {
+        throw new Error("Missing query parameters");
+    }
 
-	try {
-		// Handle JSON-encoded URL (legacy support)
-		// imageUrl = JSON.parse(imageUrl);
+    const { url: imageUrl, jpeg: jpegParam, bw: grayscaleParam, l: qualityParam } = queryParams;
+    
+    if (!imageUrl) {
+        return { healthCheck: true };
+    }
 
-		// Clean malformed URLs
-		imageUrl = imageUrl.replace(
-			/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i,
-			"http://",
-		);
+    return {
+        imageUrl,
+        isWebp: !parseInt(jpegParam, 10),
+        isGrayscale: !!parseInt(grayscaleParam, 10),
+        quality: parseInt(qualityParam, 10) || CONFIG.DEFAULT_QUALITY
+    };
+}
 
-		// get value from query url
-		const isWebp = !+s;
-		const isGrayscale = !!+o;
-		const quality = parseInt(a, 10) || 40;
+// Helper: Clean and normalize image URL
+function cleanImageUrl(url) {
+    return url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://");
+}
 
-		// Generate unique cache key
-		const urlHash = crypto.createHash("md5").update(imageUrl).digest("hex");
+// Helper: Generate unique cache key for URL
+function generateUrlHash(url) {
+    return crypto.createHash("md5").update(url).digest("hex");
+}
 
-		// Fetch upstream image dengan no-cache
-		const fetchStartTime = Date.now();
-		const fetchResult = await fetch(imageUrl, {
-			cache: "no-store", // Penting: jangan cache upstream
-			headers: {
-				...pick(event.headers, [
-					"cookie",
-					"dnt",
-					"referer",
-					"user-agent",
-					"accept",
-					"accept-language",
-				]),
-				"x-forwarded-for": event.headers["x-forwarded-for"] || event.ip,
-				"accept-encoding": "identity",
-			},
-		});
+// Helper: Fetch image from upstream
+async function fetchUpstreamImage(url, headers, ip) {
+    const fetchStartTime = Date.now();
+    
+    const fetchHeaders = {
+        ...pick(headers, CONFIG.FETCH_HEADERS_TO_PICK),
+        "x-forwarded-for": headers["x-forwarded-for"] || ip,
+        "accept-encoding": "identity"
+    };
 
-		const fetchTime = Date.now() - fetchStartTime;
+    const response = await fetch(url, {
+        cache: "no-store",
+        headers: fetchHeaders
+    });
 
-		if (!fetchResult.ok) {
-			logger.logUpstreamFetch({
-				url: imageUrl,
-				statusCode: fetchResult.status,
-				fetchTime,
-				success: false,
-			});
-			return {
-				statusCode: fetchResult.status || 502,
-				headers: getCacheHeaders(),
-			};
-		}
+    const fetchTime = Date.now() - fetchStartTime;
 
-		// Get headers dan clean encoding
-		const upstreamHeaders = Object.fromEntries(fetchResult.headers.entries());
-		delete upstreamHeaders["content-encoding"];
-		delete upstreamHeaders["transfer-encoding"];
-		delete upstreamHeaders["x-encoded-content-encoding"];
+    return {
+        response,
+        fetchTime,
+        success: response.ok
+    };
+}
 
-		const contentType = fetchResult.headers.get("content-type") || "";
-		const buffer = Buffer.from(await fetchResult.arrayBuffer());
-		const contentLength = buffer.length;
+// Helper: Process and validate upstream response
+async function processUpstreamResponse(fetchResult, url, fetchTime) {
+    const { response, success } = fetchResult;
 
-		logger.logUpstreamFetch({
-			url: imageUrl,
-			statusCode: fetchResult.status,
-			// contentType,
-			// contentLength: String(contentLength),
-			fetchTime,
-			success: true,
-		});
+    if (!success) {
+        logger.logUpstreamFetch({
+            url,
+            statusCode: response.status,
+            fetchTime,
+            success: false
+        });
+        throw new Error(`Upstream fetch failed with status: ${response.status}`);
+    }
 
-		// Validasi content-type
-		if (!contentType.startsWith("image/")) {
-			logger.warn("Non-image content received", {
-				url: imageUrl,
-				contentType,
-				size: contentLength,
-			});
-			const base64Body = buffer.toString("base64");
-			return {
-				statusCode: 200,
-				body: base64Body,
-				isBase64Encoded: true,
-				headers: getCacheHeaders({
-					"content-type": contentType,
-					"content-length": Buffer.byteLength(base64Body, "base64"),
-					"x-bypass-reason": "non-image",
-					"x-url-hash": urlHash,
-				}),
-			};
-		}
+    // Get and clean headers
+    const upstreamHeaders = Object.fromEntries(response.headers.entries());
+    delete upstreamHeaders["content-encoding"];
+    delete upstreamHeaders["transfer-encoding"];
+    delete upstreamHeaders["x-encoded-content-encoding"];
 
-		// Bypass untuk gambar sangat kecil
-		const BYPASS_THRESHOLD = 10240; // 10KB
-		if (contentLength < BYPASS_THRESHOLD && !isGrayscale && !isWebp && !s) {
-			logger.logBypass({
-				url: imageUrl,
-				size: contentLength,
-				// contentType,
-				reason: "already_small",
-			});
-			const base64Body = buffer.toString("base64");
-			return {
-				statusCode: 200,
-				body: base64Body,
-				isBase64Encoded: true,
-				headers: getCacheHeaders({
-					"content-type": contentType,
-					"content-length": Buffer.byteLength(base64Body, "base64"),
-					"x-bypass-reason": "already_small",
-					"x-url-hash": urlHash,
-				}),
-			};
-		}
+    const contentType = response.headers.get("content-type") || "";
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentLength = buffer.length;
 
-		// Check apakah perlu kompresi
-		if (!shouldCompress(contentType, contentLength, isWebp)) {
-			logger.logBypass({
-				url: imageUrl,
-				size: contentLength,
-				// contentType,
-				reason: "criteria_not_met",
-			});
-			const base64Body = buffer.toString("base64");
-			return {
-				statusCode: 200,
-				body: base64Body,
-				isBase64Encoded: true,
-				headers: getCacheHeaders({
-					...upstreamHeaders,
-					"content-length": Buffer.byteLength(base64Body, "base64"),
-					"x-bypass-reason": "criteria_not_met",
-					"x-url-hash": urlHash,
-				}),
-			};
-		}
+    logger.logUpstreamFetch({
+        url,
+        statusCode: response.status,
+        fetchTime,
+        success: true
+    });
 
-		// Kompres gambar
-		const {
-			err,
-			output,
-			headers: compressHeaders,
-		} = await compress(buffer, isWebp, isGrayscale, quality, contentLength);
+    return {
+        buffer,
+        contentType,
+        contentLength,
+        upstreamHeaders
+    };
+}
 
-		// const processingTime = Date.now() - startTime;
+// Helper: Determine if we should bypass compression
+function shouldBypassCompression(contentLength, contentType, isGrayscale, isWebp, jpegParam) {
+    // Bypass very small images (unless modifications requested)
+    if (contentLength < CONFIG.BYPASS_THRESHOLD && !isGrayscale && !isWebp && !jpegParam) {
+        return { bypass: true, reason: "already_small" };
+    }
 
-		if (err) {
-			logger.logCompressionProcess({
-				url: imageUrl,
-				// originalSize: contentLength,
-				error: err,
-				// processingTime,
-			});
-			throw err;
-		}
+    // Check compression criteria
+    if (!shouldCompress(contentType, contentLength, isWebp)) {
+        return { bypass: true, reason: "criteria_not_met" };
+    }
 
-		const finalBuffer = Buffer.isBuffer(output) ? output : Buffer.from(output);
-		// const compressionRatio =
-		//	(contentLength - finalBuffer.length) / contentLength;
-		const responseBase64 = finalBuffer.toString("base64");
+    // Validate content type
+    if (!contentType.startsWith("image/")) {
+        return { bypass: true, reason: "non-image" };
+    }
 
-		logger.logCompressionProcess({
-			// url: imageUrl,
-			// originalSize: contentLength,
-			// compressedSize: finalBuffer.length,
-			// transmittedSize: responseBase64.length,
-			// format: isWebp ? "webp" : "jpeg",
-			quality,
-			// grayscale: isGrayscale,
-			// compressionRatio,
-			bytesSaved: contentLength - finalBuffer.length,
-			// processingTime,
-			// overhead: responseBase64.length - finalBuffer.length,
-		});
+    return { bypass: false };
+}
 
-		return {
-			statusCode: 200,
-			body: responseBase64,
-			isBase64Encoded: true,
-			headers: getCacheHeaders({
-				...upstreamHeaders,
-				...(compressHeaders || {}),
-				"content-type": compressHeaders?.["content-type"] || contentType,
-				"content-length": Buffer.byteLength(responseBase64, "base64"),
-				"x-compressed-by": "bandwidth-hero",
-				"x-url-hash": urlHash,
-			}),
-		};
-	} catch (error) {
-		// const processingTime = Date.now() - startTime;
+// Main handler
+exports.handler = async (event, context) => {
+    try {
+        // 1. Parse query parameters
+        const params = parseQueryParams(event.queryStringParameters);
+        
+        if (params.healthCheck) {
+            return {
+                statusCode: 200,
+                body: "bandwidth-hero-proxy",
+                headers: getCacheHeaders()
+            };
+        }
 
-		logger.error("UNKNOWN: ", {
-			url: imageUrl,
-			error: error.message,
-			stack: error.stack,
-			// processingTime,
-		});
+        const { imageUrl: rawUrl, isWebp, isGrayscale, quality } = params;
+        
+        // 2. Clean URL
+        const imageUrl = cleanImageUrl(rawUrl);
+        const urlHash = generateUrlHash(imageUrl);
 
-		return {
-			statusCode: 500,
-			body: JSON.stringify({
-				error: error.message || "Internal server error",
-				url: imageUrl,
-			}),
-			headers: getCacheHeaders({ "content-type": "application/json" }),
-		};
-	}
+        // 3. Fetch upstream image
+        const fetchResult = await fetchUpstreamImage(imageUrl, event.headers, event.ip);
+        
+        // 4. Process response
+        const { buffer, contentType, contentLength, upstreamHeaders } = 
+            await processUpstreamResponse(fetchResult, imageUrl, fetchResult.fetchTime);
+
+        // 5. Check if compression should be bypassed
+        const bypassCheck = shouldBypassCompression(
+            contentLength, 
+            contentType, 
+            isGrayscale, 
+            isWebp, 
+            event.queryStringParameters.jpeg
+        );
+
+        if (bypassCheck.bypass) {
+            logger.logBypass({
+                url: imageUrl,
+                size: contentLength,
+                reason: bypassCheck.reason
+            });
+
+            return createImageResponse(buffer, contentType, {
+                ...upstreamHeaders,
+                "x-bypass-reason": bypassCheck.reason,
+                "x-url-hash": urlHash
+            });
+        }
+
+        // 6. Compress image
+        const { err, output, headers: compressHeaders } = await compress(
+            buffer, 
+            isWebp, 
+            isGrayscale, 
+            quality, 
+            contentLength
+        );
+
+        if (err) {
+            logger.logCompressionProcess({
+                url: imageUrl,
+                error: err
+            });
+            throw err;
+        }
+
+        // 7. Create final response
+        const finalBuffer = Buffer.isBuffer(output) ? output : Buffer.from(output);
+        const bytesSaved = contentLength - finalBuffer.length;
+
+        logger.logCompressionProcess({
+            quality,
+            bytesSaved
+        });
+
+        return createImageResponse(finalBuffer, 
+            compressHeaders?.["content-type"] || contentType, {
+            ...upstreamHeaders,
+            ...(compressHeaders || {}),
+            "x-compressed-by": "bandwidth-hero",
+            "x-url-hash": urlHash
+        });
+
+    } catch (error) {
+        logger.error("Handler error", {
+            error: error.message,
+            stack: error.stack
+        });
+
+        if (error.message === "Missing query parameters") {
+            return createErrorResponse(400, error.message);
+        }
+
+        if (error.message.startsWith("Upstream fetch failed")) {
+            const statusCode = parseInt(error.message.split(":")[1]) || 502;
+            return {
+                statusCode,
+                headers: getCacheHeaders()
+            };
+        }
+
+        return createErrorResponse(500, "Internal server error", event?.queryStringParameters?.url);
+    }
 };
