@@ -159,13 +159,14 @@ async function processImage(imagePath, format, quality, grayscale, config) {
             effort: 6,
             smartSubsample: true,
             nearLossless: false,
-            alphaQuality: quality
+            alphaQuality: quality,
+            preset: 'drawing'
         })
     };
 
     return sharp(imagePath, sharpOptions)
         .resize({
-            kernel: sharp.kernel.lanczos3,
+            kernel: isJpeg ? sharp.kernel.mitchell : sharp.kernel.lanczos2,
             width: config.MAX_WIDTH,
             fit: "inside",
             withoutEnlargement: true
