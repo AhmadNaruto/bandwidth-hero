@@ -122,20 +122,20 @@ class Logger {
 		} = details;
 
 		if (error) {
-			this.warn("Compression failed", {
+			this.warn("Failed Compress: ", {
 				url: url ? this.truncateUrl(url) : "Unknown",
 				originalSize: originalSize ? this.formatBytes(originalSize) : "Unknown",
 				error: error.message || String(error),
 				// processingTime
 			});
 		} else {
-			this.info("Compression successful", {
-				originalSize: originalSize ? this.formatBytes(originalSize) : "Unknown",
+			this.info("Image Zip: ", {
+				/** originalSize: originalSize ? this.formatBytes(originalSize) : "Unknown",
 				compressedSize: compressedSize
 					? this.formatBytes(compressedSize)
-					: "Unknown",
+					: "Unknown", */
 				savings: bytesSaved ? this.formatBytes(bytesSaved) : "Unknown",
-				savingsPercentage:
+				percent:
 					originalSize && compressedSize
 						? (((originalSize - compressedSize) / originalSize) * 100).toFixed(
 								1,
@@ -177,7 +177,7 @@ class Logger {
 	logBypass(bypassDetails = {}) {
 		const { url, size, reason } = bypassDetails;
 
-		this.info("Bypassing compression", {
+		this.info("Bypassing: ", {
 			url: url ? this.truncateUrl(url) : "Unknown",
 			size: size ? this.formatBytes(size) : "Unknown",
 			reason: reason || "Unknown",
@@ -199,9 +199,9 @@ class Logger {
 		const level = success ? "INFO" : "WARN";
 		this._log(
 			level,
-			success ? "Upstream fetch successful" : "Upstream fetch failed",
+			success ? "Get Image Ok: " : "Get Image Err",
 			{
-				url: url ? this.truncateUrl(url, 30) : "Unknown",
+				url: url ? this.truncateUrl(url, 20) : "Unknown",
 				statusCode: statusCode || "Unknown",
 				// size: size ? this.formatBytes(size) : 'Unknown',
 				// fetchTime: fetchTime ? `${fetchTime}ms` : 'Unknown'
@@ -232,4 +232,4 @@ const logger = new Logger(
 	process.env.LOG_ENABLED !== "false",
 );
 
-module.exports = logger;
+export default logger;

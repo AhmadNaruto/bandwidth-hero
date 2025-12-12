@@ -1,8 +1,7 @@
 // compress.js - OPTIMIZED: Enhanced structure, error handling, and compression logic
-// compress.js - OPTIMIZED: Enhanced structure, error handling, and compression logic
 
-const sharp = require("sharp");
-const logger = require("./logger");
+import sharp from "sharp";
+import logger from "./logger.js";
 
 // Configuration constants
 const CONFIG = {
@@ -13,6 +12,27 @@ const CONFIG = {
 	GRAYSCALE_QUALITY_RANGE: { min: 10, max: 40 },
 	DEFAULT_DIMENSIONS: { width: 480, height: 480 },
 	DEFAULT_FORMAT: "webp",
+
+	// New optimized format options
+	JPEG_OPTIONS: {
+		quality: 80, // Placeholder - will be replaced by actual quality value
+		progressive: true,
+		mozjpeg: true,
+		chromaSubsampling: "4:2:0",
+		trellisQuantisation: true,
+		overshootDeringing: true,
+		quantisationTable: 3,
+	},
+	WEBP_OPTIONS: {
+		quality: 80, // Placeholder - will be replaced by actual quality value
+		effort: 6,
+		smartSubsample: true,
+		nearLossless: false,
+		lossless: false,
+		alphaQuality: 80, // Placeholder - will be replaced by actual quality value
+		sharpYuv: true,
+		force: true,
+	}
 };
 
 async function compress(imagePath, useWebp, grayscale, quality, originalSize) {
@@ -98,7 +118,10 @@ async function compress(imagePath, useWebp, grayscale, quality, originalSize) {
 // HELPER FUNCTIONS
 async function getImageMetadata(imagePath) {
 	try {
-		return await sharp(imagePath).metadata();
+		return await sharp(imagePath, {
+			sequentialRead: true,
+			limitInputPixels: CONFIG.MAX_INPUT_PIXELS,
+		}).metadata();
 	} catch (error) {
 		logger.warn("Metadata read failed, using defaults", {
 			error: error.message,
@@ -140,37 +163,31 @@ function selectFormat(useWebp, calculatedHeight, config) {
 async function processImage(imagePath, format, quality, grayscale, config) {
 	const isJpeg = format === "jpeg";
 
+	// Prepare format-specific options with dynamic quality values
+	const formatOptions = isJpeg
+		? {
+				...config.JPEG_OPTIONS,
+				quality,
+		  }
+		: {
+				...config.WEBP_OPTIONS,
+				quality,
+				alphaQuality: quality,
+				sharpYuv: !grayscale,
+		  };
+
 	const sharpOptions = {
 		sequentialRead: true,
 		limitInputPixels: config.MAX_INPUT_PIXELS,
-	};
-
-	const formatOptions = {
-		quality,
-		progressive: true,
-		optimizeScans: true,
-		...(isJpeg
-			? {
-					mozjpeg: true,
-					chromaSubsampling: "4:2:0",
-					trellisQuantisation: true,
-					overshootDeringing: true,
-					quantisationTable: 3,
-				}
-			: {
-					effort: 6,
-					smartSubsample: true,
-					nearLossless: false,
-					lossless: false,
-					sharpYuv: !grayscale,
-					alphaQuality: quality,
-					// preset: "drawing",
-				}),
+		failOnError: false, // Continue even if some operations fail
+		force: true, // Force the output format
 	};
 
 	return sharp(imagePath, sharpOptions)
+		// .rotate() // Auto-rotate based on EXIF orientation
+		.flatten({ background: { r: 255, g: 255, b: 255 } }) // Handle transparency by flattening
 		.resize({
-			kernel: sharp.kernel.lanczos2,
+			kernel: sharp.kernel.lanczos2, // More accurate than lanczos2
 			width: config.MAX_WIDTH,
 			fit: "inside",
 			withoutEnlargement: true,
@@ -206,4 +223,4 @@ function createResponse(
 	};
 }
 
-module.exports = compress;
+export default compress;

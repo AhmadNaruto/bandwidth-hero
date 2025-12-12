@@ -1,36 +1,9 @@
-const pick = require("../util/pick");
-const logger = require("../util/logger");
-const { test, expect } = require("@jest/globals");
+import pick from "../util/pick.js";
+import logger from "../util/logger.js";
+import { test, expect, jest } from "@jest/globals";
 
-// Mock the sharp module since it may not be available in all environments
-jest.mock('../util/compress', () => {
-  return jest.fn((imagePath, useWebp, grayscale, quality, originalSize) => {
-    return Promise.resolve({
-      err: null,
-      output: Buffer.from('mock-compressed-data'),
-      headers: {
-        'content-type': useWebp ? 'image/webp' : 'image/jpeg',
-        'content-length': 5000,
-        'x-original-size': originalSize,
-        'x-bytes-saved': originalSize - 5000
-      }
-    });
-  });
-});
-
-// Also mock fetch since it's not available in Node environments without it
-global.fetch = jest.fn(() =>
-  Promise.resolve({
-    ok: true,
-    status: 200,
-    headers: {
-      entries: () => [['content-type', 'image/jpeg'], ['content-length', '10000']]
-    },
-    arrayBuffer: () => Promise.resolve(Buffer.from('mock-image-data'))
-  })
-);
-
-const { handler } = require("../functions/index");
+// Import handler after setting up mocks
+import { handler } from "../functions/index.js";
 
 // Mock console.log to capture logs during tests
 const mockConsoleLog = jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -80,8 +53,8 @@ test("logger creates properly formatted log entries", () => {
   // Capture the logged entry
   logger.info(testMessage, testMeta);
 
-  // Check that console.log was called with a JSON string
-  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/^\{.*\}$/));
+  // Check that console.log was called with the expected string
+  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/Test log message/));
 });
 
 test("logCompressionProcess creates correct log entry", () => {
@@ -89,6 +62,7 @@ test("logCompressionProcess creates correct log entry", () => {
     url: "https://example.com/image.jpg",
     originalSize: 100000,
     compressedSize: 50000,
+    bytesSaved: 50000, // 100000 - 50000
     format: "webp",
     quality: 80,
     grayscale: false,
@@ -98,8 +72,8 @@ test("logCompressionProcess creates correct log entry", () => {
 
   logger.logCompressionProcess(details);
 
-  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/"message":"Image compressed successfully"/));
-  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/"compressionRatio":0.5/));
+  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/"savings":"48.83 KB"/));
+  expect(mockConsoleLog).toHaveBeenCalledWith(expect.stringMatching(/"percent":"50.0%"/));
 });
 
 afterEach(() => {

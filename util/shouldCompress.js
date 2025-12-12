@@ -45,4 +45,4 @@ function shouldCompress(imageType, size, isTransparent) {
 	return true;
 }
 
-module.exports = shouldCompress;
+export default shouldCompress;

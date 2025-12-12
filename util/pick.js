@@ -70,4 +70,4 @@ function pick(source, properties) {
 //     return result;
 // }
 
-module.exports = pick;
+export default pick;

@@ -1,10 +1,11 @@
 // index.js - OPTIMIZED: Enhanced structure, error handling, and performance
 
-const crypto = require("node:crypto");
-const pick = require("../util/pick");
-const shouldCompress = require("../util/shouldCompress");
-const compress = require("../util/compress");
-const logger = require("../util/logger");
+import crypto from "node:crypto";
+import got from "got";
+import pick from "../util/pick.js";
+import shouldCompress from "../util/shouldCompress.js";
+import compress from "../util/compress.js";
+import logger from "../util/logger.js";
 
 // Configuration constants
 const CONFIG = {
@@ -104,28 +105,79 @@ function generateUrlHash(url) {
 	return crypto.createHash("md5").update(url).digest("hex");
 }
 
-// Helper: Fetch image from upstream
+// Helper: Fetch image from upstream using got with retry
+const fetchWithRetry = got.extend({retry: {
+    limit: 2, // ← Kurangi retry di free tier (hemat waktu)
+    methods: ['GET'],
+    statusCodes: [408, 429, 500, 502, 503, 504],
+    errorCodes: ['ETIMEDOUT', 'ECONNRESET', 'ENOTFOUND'],
+    calculateDelay: ({ attemptCount }) => Math.min(attemptCount * 500, 1000), // ← Jeda pendek
+  },
+	timeout: {
+		request: 8500, // 7 seconds timeout to allow processing time before Netlify's 10s limit
+	},
+	decompress: true,
+  throwHttpErrors: false,
+  http2: false,
+});
+
 async function fetchUpstreamImage(url, headers, ip) {
 	const fetchStartTime = Date.now();
 
 	const fetchHeaders = {
 		...pick(headers, CONFIG.FETCH_HEADERS_TO_PICK),
 		"x-forwarded-for": headers["x-forwarded-for"] || ip,
-		"accept-encoding": "identity",
 	};
+	// Only set accept-encoding to identity if specifically requested by client
+	if (headers["accept-encoding"] === "identity") {
+		fetchHeaders["accept-encoding"] = "identity";
+	}
 
-	const response = await fetch(url, {
-		cache: "no-store",
-		headers: fetchHeaders,
+	try {
+		const response = await fetchWithRetry(url, {
+			headers: fetchHeaders,
+			responseType: 'buffer', // Explicitly request binary buffer response for images
 	});
 
-	const fetchTime = Date.now() - fetchStartTime;
+		const fetchTime = Date.now() - fetchStartTime;
 
-	return {
-		response,
-		fetchTime,
-		success: response.ok,
-	};
+		// Create a compatible response object that mimics fetch API
+		return {
+			response: {
+				ok: response.statusCode >= 200 && response.statusCode < 300,
+				status: response.statusCode,
+				headers: {
+					get: (headerName) => response.headers[headerName.toLowerCase()] || null,
+					entries: () => Object.entries(response.headers)
+				},
+				arrayBuffer: async () => Buffer.from(response.body)
+			},
+			fetchTime,
+			success: response.statusCode >= 200 && response.statusCode < 300,
+		};
+	} catch (error) {
+		const fetchTime = Date.now() - fetchStartTime;
+
+		// Log the error
+		logger.error("Upstream fetch error", {
+			url,
+			error: error.message,
+			stack: error.stack
+		});
+
+		return {
+			response: {
+				status: error.response?.statusCode || 500,
+				headers: {
+					get: () => null,
+					entries: () => []
+				},
+				arrayBuffer: async () => Buffer.alloc(0)
+			},
+			fetchTime,
+			success: false,
+		};
+	}
 }
 
 // Helper: Process and validate upstream response
@@ -133,13 +185,14 @@ async function processUpstreamResponse(fetchResult, url, fetchTime) {
 	const { response, success } = fetchResult;
 
 	if (!success) {
+		const statusCode = response.status || 'Unknown';
 		logger.logUpstreamFetch({
 			url,
-			statusCode: response.status,
+			statusCode: statusCode,
 			fetchTime,
 			success: false,
 		});
-		throw new Error(`Upstream fetch failed with status: ${response.status}`);
+		throw new Error(`Upstream fetch failed with status: ${statusCode}`);
 	}
 
 	// Get and clean headers
@@ -149,12 +202,12 @@ async function processUpstreamResponse(fetchResult, url, fetchTime) {
 	delete upstreamHeaders["x-encoded-content-encoding"];
 
 	const contentType = response.headers.get("content-type") || "";
-	const buffer = Buffer.from(await response.arrayBuffer());
+	const buffer = await response.arrayBuffer();
 	const contentLength = buffer.length;
 
 	logger.logUpstreamFetch({
 		url,
-		statusCode: response.status,
+		statusCode: response.status || 'Unknown',
 		fetchTime,
 		success: true,
 	});
@@ -199,7 +252,7 @@ function shouldBypassCompression(
 }
 
 // Main handler
-exports.handler = async (event, _context) => {
+export const handler = async (event, _context) => {
 	try {
 		// 1. Parse query parameters
 		const params = parseQueryParams(event.queryStringParameters);
@@ -293,7 +346,7 @@ exports.handler = async (event, _context) => {
 			compressedSize: finalBuffer.length,
 			bytesSaved: bytesSaved,
 			quality: quality,
-			format: isWebp ? "webp" : "jpeg"
+			format: compressHeaders?.["content-type"] || (isWebp ? "webp" : "jpeg"),
 			// processingTime: processingTime
 		});
 
@@ -318,9 +371,10 @@ exports.handler = async (event, _context) => {
 		}
 
 		if (error.message.startsWith("Upstream fetch failed")) {
-			const statusCode = parseInt(error.message.split(":")[1], 10) || 502;
+			const statusPart = error.message.split(":")[1]?.trim();
+			const statusCode = statusPart && statusPart !== 'Unknown' ? parseInt(statusPart, 10) : 502;
 			return {
-				statusCode,
+				statusCode: statusCode || 502,
 				headers: getCacheHeaders(),
 			};
 		}
