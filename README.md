@@ -14,6 +14,42 @@ It downloads original image and transforms it with [Sharp](https://github.com/lo
 
 > Note: It downloads images on user's behalf (By passing in same headers to the domain with required image), passing cookies and user's IP address through to the origin host.
 
+## Features
+
+- **On-the-fly Image Compression**: Converts images to WebP or JPEG formats with adjustable quality
+- **Modern Logging System**: Structured, clean logging of the compression process with multiple log levels
+- **Performance Monitoring**: Time tracking for various operations to identify bottlenecks
+- **Cloudflare Compatibility**: Forwards browser headers to avoid detection by Cloudflare and similar services
+- **Serverless Architecture**: Deployable on Netlify Functions for cost-effective scaling
+- **Format Options**: Support for both WebP and JPEG output formats with quality adjustment capability
+- **Grayscale Conversion**: Optional grayscale conversion for images to reduce file size further
+- **Quality Control**: Adjustable quality levels (default 40) allowing control over compression ratio
+- **Intelligent Compression Logic**: Smart decision-making system that determines whether to compress images based on size, format, and user preferences
+- **Header Forwarding**: Passes through user headers (User-Agent, Accept, Accept-Language, Accept-Encoding, Cookie, DNT, Referer) to maintain authenticity of requests
+- **IP Address Preservation**: Maintains user's IP address when forwarding requests to origin hosts
+- **Bypass Logic**: Automatically bypasses compression for very small images or those that don't meet specific criteria
+- **Size Validation**: Includes checks to ensure compressed output isn't larger than original
+- **Transparency Handling**: Special handling for transparent images to determine compression appropriateness
+- **Dimension Management**: Automatic resizing with maximum width limits to optimize compression
+- **Metadata Extraction**: Safe extraction and utilization of image metadata for optimal processing
+- **Cache Management**: Proper cache headers to prevent unwanted caching of compressed images
+- **Health Checking**: Built-in health check endpoint for monitoring service availability
+- **Error Handling**: Comprehensive error handling with appropriate HTTP status codes
+- **Content Type Detection**: Accurate identification and validation of image types for appropriate processing
+- **Bandwidth Optimization**: Significant reduction in image file sizes to save bandwidth and improve load times
+
+## Logging
+
+The service features a modern structured logging system that creates clean, JSON-formatted logs with:
+
+- Detailed compression metrics (original vs compressed size, format, quality, etc.)
+- Request information (URL, user agent, referer, IP)
+- Performance timing (fetch time, processing time)
+- Error details with stack traces when applicable
+- Bypass information for images that don't meet compression criteria
+
+See `docs/logging-system.md` for full documentation on the logging system.
+
 ## Cloudflare Compatibility
 
 This proxy forwards browser headers (User-Agent, Accept, Accept-Language, Accept-Encoding, Cookie, DNT, Referer) to make requests appear like legitimate browser requests. This helps avoid being blocked by Cloudflare CAPTCHA challenges that commonly trigger on bot-like requests.
@@ -28,7 +64,7 @@ Then, in the **Data Compression Service** in Bandwidth Hero extension, add `http
 
 <!-- READ THIS ARTICLE LATER AdityaG
 Check out [this guide](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-node-js-application-for-production-on-ubuntu-16-04)
-on how to setup Node.js on Ubuntu. 
+on how to setup Node.js on Ubuntu.
 DigitalOcean also provides an
 [easy way](https://www.digitalocean.com/products/one-click-apps/node-js/) to setup a server ready to
 host Node.js apps.
