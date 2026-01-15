@@ -97,7 +97,8 @@ function parseQueryParams(queryParams) {
 
 // Helper: Clean and normalize image URL
 function cleanImageUrl(url) {
-	return url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://");
+	return new URL(url.trim()).href
+	// return url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://");
 }
 
 // Helper: Generate unique cache key for URL
