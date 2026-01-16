@@ -73,7 +73,7 @@ const processImage = async (imagePath, format, quality, grayscale) => {
   })
     .flatten({ background: { r: 255, g: 255, b: 255 } })
     .resize({
-      kernel: sharp.kernel.lanczos2,
+      kernel: sharp.kernel.lanczos3,
       width: CONFIG.MAX_WIDTH,
       fit: "inside",
       withoutEnlargement: true,
