@@ -24,7 +24,7 @@ const CONFIG = {
   },
   
   AVIF_OPTIONS: {
-    effort: 2,
+    effort: 4,
     chromaSubsampling: "4:4:4",
     bitdepth: 8,
     force: true,
