@@ -37,10 +37,9 @@ const CONFIG = {
   
   // Concurrency limits - prevent memory overload
   MAX_CONCURRENT_REQUESTS: 100,
-  
-  // Memory monitoring
+
+  // Memory monitoring - relaxed for manga/webtoon image processing
   MEMORY_CHECK_INTERVAL: 30000, // Check every 30s
-  MEMORY_THRESHOLD_PERCENT: 0.85, // Reject new requests at 85% memory
   MEMORY_CIRCUIT_BREAKER_COOLDOWN: 60000, // 1min cooldown when triggered
 };
 
@@ -89,33 +88,51 @@ app.use((req, res, next) => {
 let memoryCircuitBreaker = false;
 let memoryCircuitBreakerUntil = 0;
 let memoryCheckCount = 0;
+let baselineHeapUsed = 0;
 
 const checkMemoryHealth = () => {
   const memUsage = process.memoryUsage();
   const heapUsedPercent = memUsage.heapUsed / memUsage.heapTotal;
+  const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const rssMB = Math.round(memUsage.rss / 1024 / 1024);
   
-  // Skip first few checks to allow Node.js V8 to stabilize
+  // Skip first 10 checks to allow Node.js V8 to stabilize (~5 minutes)
   memoryCheckCount++;
-  if (memoryCheckCount < 5) {
+  if (memoryCheckCount < 10) {
+    if (memoryCheckCount === 1) {
+      baselineHeapUsed = heapUsedMB;
+      logger.info("Memory baseline established", { baselineHeapUsed });
+    }
     return true;
   }
-
+  
+  // Reset circuit breaker after cooldown
   if (memoryCircuitBreaker && Date.now() > memoryCircuitBreakerUntil) {
     memoryCircuitBreaker = false;
-    logger.warn("Memory circuit breaker reset", { heapUsedPercent: (heapUsedPercent * 100).toFixed(2) });
+    logger.warn("Memory circuit breaker reset", { 
+      heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
+      heapUsedMB,
+      rssMB 
+    });
   }
-
-  if (!memoryCircuitBreaker && heapUsedPercent > CONFIG.MEMORY_THRESHOLD_PERCENT) {
+  
+  // Only trigger if heap is critically high (>90%) OR RSS is very high
+  // This prevents false positives from V8's aggressive heap allocation
+  const isHeapCritical = heapUsedPercent > 0.90;
+  const isRssHigh = rssMB > 1024; // 1GB RSS threshold
+  
+  if (!memoryCircuitBreaker && (isHeapCritical || isRssHigh)) {
     memoryCircuitBreaker = true;
     memoryCircuitBreakerUntil = Date.now() + CONFIG.MEMORY_CIRCUIT_BREAKER_COOLDOWN;
     logger.error("Memory circuit breaker triggered", {
-      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
+      heapUsedMB,
       heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
       heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
-      rss: Math.round(memUsage.rss / 1024 / 1024),
+      rssMB,
+      reason: isHeapCritical ? "heap_critical" : "rss_high",
     });
   }
-
+  
   return !memoryCircuitBreaker;
 };
 
