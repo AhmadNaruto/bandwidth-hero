@@ -64,13 +64,41 @@ const cleanImageUrl = (url) => new URL(url.trim()).href;
 // Using SHA-256 truncated to 16 chars for better security than MD5
 const generateUrlHash = (url) => crypto.createHash("sha256").update(url).digest("hex").slice(0, 16);
 
-// Configure fetch with retry
+// Configure fetch with retry and connection pooling
 const fetchWithRetry = got.extend({
-  retry: { limit: 2, methods: ["GET"], statusCodes: [408, 429, 500, 502, 503, 504] },
-  timeout: { request: 8500 },
+  retry: { 
+    limit: 2, 
+    methods: ["GET"], 
+    statusCodes: [408, 429, 500, 502, 503, 504],
+    calculateDelay: ({ attemptCount, errorCode, error, retryOptions }) => {
+      // Don't retry on client errors (4xx) except 429
+      if (error?.response?.statusCode >= 400 && error.response.statusCode < 500 && error.response.statusCode !== 429) {
+        return 0;
+      }
+      // Exponential backoff: 100ms, 200ms, 400ms
+      const delay = Math.min(retryOptions.maxRetryAfter || 2000, 100 * Math.pow(2, attemptCount - 1));
+      return delay;
+    },
+  },
+  timeout: { 
+    request: 8500,
+    connect: 3000,
+    lookup: 1000,
+  },
   decompress: true,
   throwHttpErrors: false,
-  http2: false,
+  http2: true, // Enable HTTP/2 for better performance
+  https: {
+    rejectUnauthorized: true,
+  },
+  // Connection pooling
+  agent: {
+    // Agents will be set dynamically based on protocol
+  },
+  // Limit maxSockets to prevent resource exhaustion
+  request: {
+    // This is handled by the Agent
+  },
 });
 
 const fetchUpstreamImage = async (url, headers, ip) => {

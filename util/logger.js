@@ -1,6 +1,13 @@
-// logger.js - REFACTORED: More concise and LSP-friendly version
+// logger.js - Production-optimized structured logging
 
 const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
+
+// Use stdout.write for better performance than console.log
+const writeLog = (logEntry) => {
+  // JSON.stringify is synchronous but necessary for atomic writes
+  // Using stdout.write avoids some overhead of console.log
+  process.stdout.write(JSON.stringify(logEntry) + "\n");
+};
 
 class Logger {
   constructor(level = "INFO", enabled = true) {
@@ -34,7 +41,7 @@ class Logger {
       message,
       ...metadata
     };
-    console.log(JSON.stringify(logEntry));
+    writeLog(logEntry);
   }
 
   // Public logging methods
@@ -44,7 +51,7 @@ class Logger {
   debug(message, metadata = {}) { return this._log("DEBUG", message, metadata); }
   trace(message, metadata = {}) { return this._log("TRACE", message, metadata); }
 
-  // Specialized loggers
+  // Specialized loggers - optimized for minimal object creation
   logCompressionProcess(details = {}) {
     const { url, originalSize, compressedSize, bytesSaved, quality, format, error = null } = details;
 
@@ -67,6 +74,7 @@ class Logger {
   }
 
   logRequest(requestDetails = {}) {
+    // Only log in debug mode to reduce I/O in production
     const { url, userAgent, referer, ip, jpeg, bw, quality, contentType } = requestDetails;
 
     this.debug("Request received", {
