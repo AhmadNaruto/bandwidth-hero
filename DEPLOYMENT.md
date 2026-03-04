@@ -2,7 +2,7 @@
 
 ## Prerequisites
 - VPS with Ubuntu/Debian or CentOS/RHEL
-- Node.js >= 21.0.0
+- Node.js >= 20.0.0 (21.x recommended)
 - PM2 (process manager) or systemd
 
 ## Quick Start
@@ -11,6 +11,7 @@
 
 ```bash
 # Install Node.js (if not installed)
+# Uses Node.js 21.x (recommended, compatible with >=20.0.0 requirement)
 curl -fsSL https://deb.nodesource.com/setup_21.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
@@ -26,7 +27,7 @@ npm install --production
 
 Create `.env` file:
 ```bash
-PORT=3000
+PORT=8080
 LOG_LEVEL=info
 LOG_ENABLED=true
 ```
@@ -64,7 +65,7 @@ ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-Environment=PORT=3000
+Environment=PORT=8080
 Environment=LOG_LEVEL=info
 
 # Security
@@ -103,7 +104,7 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -122,7 +123,7 @@ server {
     # Rate limiting
     location /api/ {
         limit_req zone=api burst=20 nodelay;
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -234,8 +235,8 @@ npm rebuild sharp
 
 ### Port Already in Use
 ```bash
-# Find process using port 3000
-sudo lsof -i :3000
+# Find process using port 8080
+sudo lsof -i :8080
 
 # Kill process
 sudo kill -9 <PID>

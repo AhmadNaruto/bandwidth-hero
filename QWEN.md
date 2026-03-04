@@ -2,19 +2,19 @@
 
 ## Project Overview
 
-**Bandwidth Hero Proxy** is a serverless image compression service designed to work with the [Bandwidth Hero](https://github.com/ayastreb/bandwidth-hero) browser extension. It compresses images on-the-fly by converting them to low-resolution WebP, JPEG, or AVIF formats, saving bandwidth and improving browsing experience.
+**Bandwidth Hero Proxy** is a VPS-based image compression service designed to work with the [Bandwidth Hero](https://github.com/ayastreb/bandwidth-hero) browser extension. It compresses images on-the-fly by converting them to low-resolution WebP, JPEG, or AVIF formats, saving bandwidth and improving browsing experience.
 
 ### Key Features
 - **On-the-fly Image Compression**: Converts images to WebP/JPEG/AVIF with adjustable quality
-- **Serverless Architecture**: Deployed on Netlify Functions for cost-effective scaling
+- **VPS Architecture**: Deployed on any VPS or Node.js host using Express.js
 - **Cloudflare Compatibility**: Forwards browser headers to avoid bot detection
 - **Modern Logging System**: Structured JSON logging with multiple log levels
 - **Intelligent Compression Logic**: Smart bypass decisions based on size, format, and transparency
 - **Grayscale Conversion**: Optional grayscale mode for further file size reduction
 
 ### Tech Stack
-- **Runtime**: Node.js >= 21.0.0 (ES Modules)
-- **Framework**: Netlify Functions (serverless)
+- **Runtime**: Node.js >= 20.0.0 (ES Modules)
+- **Framework**: Express.js
 - **Image Processing**: Sharp
 - **HTTP Client**: Got
 - **Testing**: Jest (with node:test compatibility)
@@ -24,29 +24,27 @@
 
 ```
 bandwidth-hero/
-├── functions/
-│   └── index.js          # Main Netlify function handler
 ├── util/
 │   ├── compress.js       # Image compression logic using Sharp
 │   ├── logger.js         # Structured logging system
 │   ├── pick.js           # Case-insensitive object property picker
 │   └── shouldCompress.js # Compression decision logic
 ├── tests/
-│   └── index.test.mjs    # Unit and integration tests
+│   ├── index.test.mjs    # Unit and integration tests
+│   └── setupTests.mjs    # Jest setup configuration
 ├── docs/
 │   ├── logging-system.md # Logging system documentation
 │   └── sample-logs.md    # Example log outputs
-├── index.html            # Static landing page
-├── netlify.toml          # Netlify configuration
+├── server.js             # Express server (main entry point)
 ├── jest.config.cjs       # Jest test configuration
+├── DEPLOYMENT.md         # VPS deployment guide
 └── package.json          # Dependencies and scripts
 ```
 
 ## Building and Running
 
 ### Prerequisites
-- Node.js >= 21.0.0
-- Netlify CLI (`npm install -g netlify-cli`)
+- Node.js >= 20.0.0
 
 ### Installation
 ```bash
@@ -55,13 +53,11 @@ npm install
 
 ### Development
 ```bash
-# Start local Netlify dev server
-npm start
-# or
-ntl dev
+# Start local development server with auto-reload
+npm run dev
 ```
 
-The function will be available at: `http://localhost:8888/api/index`
+The server will be available at: `http://localhost:8080`
 
 ### Testing
 ```bash
@@ -69,10 +65,7 @@ npm test
 ```
 
 ### Deployment
-Deploy to Netlify via the deploy button in README.md or use Netlify CLI:
-```bash
-netlify deploy --prod
-```
+See [DEPLOYMENT.md](DEPLOYMENT.md) for VPS deployment instructions using PM2 or systemd.
 
 ## API Usage
 
@@ -99,7 +92,7 @@ GET /api/index?url=<image_url>&jpeg=<0|1>&bw=<0|1>&l=<quality>
 - `content-length`: Compressed size
 - `x-compression-status`: `compressed` or `bypassed-*`
 - `x-bytes-saved`: Bytes reduced
-- `x-url-hash`: MD5 hash of source URL
+- `x-url-hash`: SHA-256 hash of source URL (truncated)
 - `x-bypass-reason`: Reason if compression was bypassed
 
 ## Development Conventions
@@ -138,22 +131,11 @@ The following headers are forwarded to upstream servers for Cloudflare compatibi
 
 ## Key Configuration
 
-### netlify.toml
-```toml
-[functions]
-    directory = "functions/"
-    node_bundler = "esbuild"
-
-[[redirects]]
-    from = "/api/*"
-    to = "/.netlify/functions/:splat"
-    status = 200
-```
-
 ### package.json Scripts
 ```json
 {
-  "start": "ntl dev",
+  "start": "node server.js",
+  "dev": "node --watch server.js",
   "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
 }
 ```
@@ -164,10 +146,10 @@ The following headers are forwarded to upstream servers for Cloudflare compatibi
 Modify `util/compress.js` - update `selectFormat()` and `CONFIG` object.
 
 ### Adjusting Compression Thresholds
-Modify `CONFIG.BYPASS_THRESHOLD` in `functions/index.js` or `util/shouldCompress.js`.
+Modify `CONFIG.BYPASS_THRESHOLD` in `server.js` or `util/shouldCompress.js`.
 
 ### Changing Log Verbosity
-Set environment variables in `.env` or Netlify dashboard:
+Set environment variables in `.env`:
 ```
 LOG_LEVEL=debug
 LOG_ENABLED=true
@@ -181,7 +163,7 @@ LOG_ENABLED=true
 ## External Dependencies
 - [Sharp](https://github.com/lovell/sharp) - High-performance image processing
 - [Got](https://github.com/sindresorhus/got) - HTTP client
-- [Netlify Functions](https://docs.netlify.com/functions/overview/) - Serverless platform
+- [Express](https://expressjs.com/) - Web framework
 
 ## Related Projects
 - Original: [adi-g15/bandwidth-hero-proxy](https://github.com/adi-g15/bandwidth-hero-proxy)

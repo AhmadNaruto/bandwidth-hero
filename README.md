@@ -13,7 +13,7 @@ This is a data compression service used by the [Bandwidth Hero](https://github.c
 - **On-the-fly Image Compression**: Converts images to WebP/AVIF/JPEG with adjustable quality
 - **Modern Logging System**: Structured JSON logging with multiple log levels
 - **Cloudflare Compatibility**: Forwards browser headers to avoid bot detection
-- **Flexible Deployment**: Deploy on VPS, Netlify, Docker, or any Node.js host
+- **VPS Deployment**: Deploy on any VPS or Node.js host
 - **Format Options**: WebP, AVIF, and JPEG output with quality control
 - **Grayscale Mode**: Optional grayscale conversion for smaller file sizes
 - **Smart Compression**: Bypasses compression for images that won't benefit
@@ -21,8 +21,6 @@ This is a data compression service used by the [Bandwidth Hero](https://github.c
 - **Performance**: Automatic resizing, metadata extraction, progressive JPEG
 
 ## Quick Start
-
-### VPS Deployment (Recommended)
 
 ```bash
 # Clone and install
@@ -34,23 +32,13 @@ npm install --production
 npm start
 ```
 
-### Netlify Deployment
-
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/ukind/bandwidth-hero-proxy2)
-
-### Docker Deployment
-
-```bash
-docker run -d -p 3000:3000 your-username/bandwidth-hero-proxy
-```
-
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ## Configuration
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `PORT` | Server port | `3000` |
+| `PORT` | Server port | `8080` |
 | `LOG_LEVEL` | Logging level (error/warn/info/debug/trace) | `info` |
 | `LOG_ENABLED` | Enable logging | `true` |
 
@@ -140,8 +128,6 @@ npm test
 
 ```
 bandwidth-hero/
-├── functions/
-│   └── index.js          # Main handler (Netlify & Express compatible)
 ├── util/
 │   ├── compress.js       # Image compression with Sharp
 │   ├── logger.js         # Structured JSON logging
