@@ -1,5 +1,5 @@
-// compress.js - Production-optimized image compression with Sharp + mozjpeg
-// REFACTORED: Using node-mozjpeg for better JPEG compression
+// compress.js - Production-optimized image compression for Manga/Webtoon/Comics
+// REFACTORED: Using node-mozjpeg optimized for line art and text
 
 import sharp from "sharp";
 import mozjpeg from "node-mozjpeg";
@@ -15,39 +15,51 @@ sharp.concurrency(concurrency);
 const cacheSize = process.env.SHARP_CACHE === "0" ? 0 : (parseInt(process.env.SHARP_CACHE, 10) || 100 * 1024 * 1024);
 sharp.cache(cacheSize);
 
-// Configuration constants
+// Configuration constants - OPTIMIZED FOR MANGA/WEBTOON/COMICS
 const CONFIG = {
-  MAX_WIDTH: 700,
-  MAX_JPEG_HEIGHT: 32767,
+  // Manga/webtoon typical dimensions
+  // Webtoon canvas: 690-800px width (mobile-optimized)
+  // Mihon/Komikku: fits mobile screens, preserve aspect ratio
+  MAX_WIDTH: 800, // Slightly wider for tablets
+  MAX_JPEG_HEIGHT: 32767, // Support long webtoon strips
   MAX_AVIF_HEIGHT: 16383,
   MAX_INPUT_PIXELS: 268402689,
-  GRAYSCALE_QUALITY_RANGE: { min: 10, max: 40 },
+  
+  // Lower quality range for grayscale manga (B/W scans)
+  // Manga doesn't need high quality, sharp edges matter more
+  GRAYSCALE_QUALITY_RANGE: { min: 15, max: 35 },
+  
   DEFAULT_DIMENSIONS: { width: 400, height: 400 },
   DEFAULT_FORMAT: "avif",
-  COMPRESSION_TIMEOUT: 15000,
+  COMPRESSION_TIMEOUT: 20000, // Slightly longer for large webtoon strips
 
-  // mozjpeg options - optimized for web performance
+  // mozjpeg options - OPTIMIZED FOR MANGA/LINE ART/TEXT
+  // Key considerations:
+  // - Preserve sharp edges (line art, text, panel borders)
+  // - Minimize blocking artifacts in solid areas
+  // - Good compression for B/W and limited color
   MOZJPEG_OPTIONS: {
-    quality: 80,
-    baseline: false, // Use progressive for better perceived performance
-    arithmetic: false, // Better compatibility with baseline
-    progressive: true,
-    optimize_coding: true,
-    smoothing: 0,
+    quality: 75, // Lower is fine for manga, reduces file size significantly
+    baseline: false,
+    arithmetic: false, // Better browser compatibility
+    progressive: true, // Better perceived loading on slow connections
+    optimize_coding: true, // Huffman optimization
+    smoothing: 1, // Light smoothing reduces noise in B/W scans without blurring text
     color_space: mozjpeg.ColorSpace.YCbCr,
-    quant_table: 3, // Optimized for photos (PSNR-HVS-M)
-    trellis_multipass: true, // Better quality at same size
+    quant_table: 2, // Table 2: better for graphics/text than table 3 (photos)
+    trellis_multipass: true, // Trellis quantization for better quality/size
     trellis_opt_zero: true,
     trellis_opt_table: true,
-    trellis_loops: 3, // More loops = better compression but slower
+    trellis_loops: 2, // 2 loops: good balance speed/quality for manga
     auto_subsample: true,
-    chroma_subsample: 2, // 4:2:0 subsampling
-    separate_chroma_quality: false,
-    chroma_quality: 75,
+    chroma_subsample: 2, // 4:2:0: fine for manga (chroma less important)
+    separate_chroma_quality: true, // Allow different chroma quality
+    chroma_quality: 60, // Lower chroma quality (saves space, imperceptible for manga)
   },
 
+  // AVIF options - good for color webtoons
   AVIF_OPTIONS: {
-    effort: 4,
+    effort: 6, // Higher effort for better compression (webtoons benefit more)
     chromaSubsampling: "4:2:0",
     bitdepth: 8,
     lossless: false,
@@ -100,21 +112,44 @@ const processImageWithMozjpeg = async (imagePath, quality, grayscale, maxWidth) 
       withoutEnlargement: true,
     });
 
+  // Apply grayscale if requested
   if (grayscale) {
     pipeline.grayscale();
   }
 
-  // Get raw RGB buffer and metadata
+  // Get raw buffer and metadata
   const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+
+  // For grayscale images, mozjpeg needs 3 channels
+  // If grayscale was applied, info.channels will be 1, we need to expand to 3
+  let rgbData = data;
+  if (info.channels === 1) {
+    // Expand grayscale to RGB (3 channels) for mozjpeg compatibility
+    // Use Buffer.concat for better performance
+    const r = data;
+    const g = data;
+    const b = data;
+    
+    // Interleave RGB channels efficiently
+    rgbData = Buffer.allocUnsafe(info.width * info.height * 3);
+    let pos = 0;
+    for (let i = 0; i < data.length; i++) {
+      rgbData[pos++] = data[i]; // R
+      rgbData[pos++] = data[i]; // G  
+      rgbData[pos++] = data[i]; // B
+    }
+  }
 
   // Use mozjpeg to encode
   const options = {
     ...CONFIG.MOZJPEG_OPTIONS,
     quality,
-    color_space: grayscale ? mozjpeg.ColorSpace.GRAYSCALE : mozjpeg.ColorSpace.YCbCr,
+    // Use YCbCr - works well for both color and grayscale
+    // Chroma subsampling will further reduce size for grayscale
+    color_space: mozjpeg.ColorSpace.YCbCr,
   };
 
-  const output = mozjpeg.encodeSync(data, info.width, info.height, options);
+  const output = mozjpeg.encodeSync(rgbData, info.width, info.height, options);
 
   return {
     data: output,
