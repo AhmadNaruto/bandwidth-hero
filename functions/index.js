@@ -61,7 +61,8 @@ const parseQueryParams = (queryParams) => {
 
 const cleanImageUrl = (url) => new URL(url.trim()).href;
 
-const generateUrlHash = (url) => crypto.createHash("md5").update(url).digest("hex");
+// Using SHA-256 truncated to 16 chars for better security than MD5
+const generateUrlHash = (url) => crypto.createHash("sha256").update(url).digest("hex").slice(0, 16);
 
 // Configure fetch with retry
 const fetchWithRetry = got.extend({

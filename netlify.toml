@@ -1,19 +1,19 @@
 # ==================================
-# 1. Konfigurasi Fungsi (Optimasi Build)
+# 1. Function Configuration (Build Optimization)
 # ==================================
 [functions]
     directory = "functions/"
-    # Mengunci versi Node.js untuk konsistensi
-    # node_version = "24"
-    # Menggunakan esbuild untuk cold start yang lebih cepat
+    # Lock Node.js version for consistency
+    node_version = "20"
+    # Using esbuild for faster cold starts
     node_bundler = "esbuild"
 
 # ==================================
-# 2. Pengalihan/Proxy (API Endpoints)
+# 2. Redirects/Proxy (API Endpoints)
 # ==================================
 [[redirects]]
-    # Mengarahkan semua permintaan /api/* ke fungsi Netlify
+    # Route all /api/* requests to Netlify functions
     from = "/api/*"
     to = "/.netlify/functions/:splat"
-    # Status 200 berarti ini bertindak sebagai proxy (rewrite)
+    # Status 200 means this acts as a proxy (rewrite)
     status = 200

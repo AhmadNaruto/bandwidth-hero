@@ -6,13 +6,14 @@ import logger from "./logger.js";
 // Configuration constants
 const CONFIG = {
   MAX_WIDTH: 400,
-  MAX_JPEG_HEIGHT: 32767,
-  MAX_AVIF_HEIGHT: 16383,
+  MAX_JPEG_HEIGHT: 32767, // JPEG spec limit
+  MAX_AVIF_HEIGHT: 16383, // AVIF spec limit
+  // Sharp default limit: 268,402,689 pixels (16384^2 + 1)
   MAX_INPUT_PIXELS: 268402689,
   GRAYSCALE_QUALITY_RANGE: { min: 10, max: 40 },
   DEFAULT_DIMENSIONS: { width: 400, height: 400 },
   DEFAULT_FORMAT: "avif",
-  
+
   JPEG_OPTIONS: {
     quality: 80,
     progressive: true,
@@ -22,7 +23,7 @@ const CONFIG = {
     overshootDeringing: true,
     quantisationTable: 3,
   },
-  
+
   AVIF_OPTIONS: {
     effort: 4,
     chromaSubsampling: "4:4:4",
@@ -98,15 +99,25 @@ const createResponse = (output, format, size, bytesSaved, status, originalSize =
 // Main compress function
 async function compress(imagePath, useAvif, grayscale, quality, originalSize) {
   try {
+    // Validate input buffer
+    if (!Buffer.isBuffer(imagePath) || imagePath.length === 0) {
+      throw new Error("Invalid or empty image buffer");
+    }
+
     const metadata = await getImageMetadata(imagePath);
     const { height: calculatedHeight } = calculateDimensions(metadata, CONFIG.MAX_WIDTH);
     const finalFormat = selectFormat(useAvif, calculatedHeight);
-    
+
     const effectiveQuality = grayscale
       ? Math.max(CONFIG.GRAYSCALE_QUALITY_RANGE.min, Math.min(quality, CONFIG.GRAYSCALE_QUALITY_RANGE.max))
       : quality;
 
-    logger.debug("Compression started (AVIF Mode)", { originalSize, effectiveQuality, format: finalFormat });
+    logger.debug("Compression started", { 
+      originalSize, 
+      effectiveQuality, 
+      format: finalFormat,
+      mode: finalFormat === "avif" ? "AVIF" : "JPEG"
+    });
 
     const { data, info } = await processImage(imagePath, finalFormat, effectiveQuality, grayscale);
 

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, afterEach } from "node:test";
 import assert from "node:assert";
 import pick from "../util/pick.js";
 import logger from "../util/logger.js";
@@ -6,13 +6,22 @@ import { handler } from "../functions/index.js";
 
 /**
  * MOCKING SECTION
- * Membajak console.log agar terminal tetap bersih saat testing.
+ * Mock console.log to keep terminal clean during testing.
  */
 const originalLog = console.log;
 let mockedLogs = [];
-console.log = (...args) => {
-    mockedLogs.push(args.join(" "));
-};
+
+beforeEach(() => {
+    mockedLogs = [];
+    console.log = (...args) => {
+        mockedLogs.push(args.join(" "));
+    };
+});
+
+afterEach(() => {
+    console.log = originalLog;
+    mockedLogs = [];
+});
 
 // --- UNIT TESTS ---
 
@@ -30,36 +39,33 @@ test("Unit: pick function - should filter headers correctly", () => {
     assert.strictEqual(result["x-ignored"], undefined);
 });
 
-// --- INTEGRATION TESTS DENGAN URL ASLI ---
+// --- INTEGRATION TESTS WITH REAL URL ---
 
 test("Integration: Handler - Success Fetch with Real URL", async () => {
     const realImageUrl = "https://picsum.photos/id/237/200/300";
-    
+
     const event = {
         queryStringParameters: {
             url: realImageUrl,
-            jpeg: "1", // Gunakan format JPEG agar lebih cepat
-            l: "10"    // Kualitas rendah untuk mempercepat proses kompresi saat test
+            jpeg: "1", // Use JPEG format for faster processing
+            l: "10"    // Low quality for faster compression during test
         },
-        headers: { 
+        headers: {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "accept": "image/webp,image/apng,image/*,*/*;q=0.8"
         },
         ip: "1.1.1.1"
     };
 
-    console.info("Sedang mencoba fetch URL asli, harap tunggu...");
     const response = await handler(event);
 
-    // Jika berhasil, status 200. Jika diblokir oleh Kiryuu (403/404), tes tetap lulus 
-    // asalkan handler tidak crash dan mengembalikan status code yang valid.
+    // If successful, status 200. If blocked by hotlink protection (403/404), test still passes
+    // as long as handler doesn't crash and returns a valid status code.
     if (response.statusCode === 200) {
-        assert.ok(response.body.length > 0, "Body response tidak boleh kosong");
+        assert.ok(response.body.length > 0, "Response body should not be empty");
         assert.strictEqual(response.headers["content-type"].startsWith("image/"), true);
-        console.info("✔ Berhasil mengambil dan mengompres gambar asli.");
     } else {
-        console.warn(`⚠ Upstream merespon dengan status: ${response.statusCode}. Ini mungkin karena proteksi Hotlink.`);
-        assert.ok([403, 404, 502, 503].includes(response.statusCode), "Harus mengembalikan error status yang valid");
+        assert.ok([403, 404, 502, 503].includes(response.statusCode), "Must return valid error status");
     }
 });
 
@@ -72,7 +78,7 @@ test("Integration: Handler - Health Check", async () => {
 });
 
 test("Integration: Handler - Missing Query Parameters", async () => {
-    const event = { queryStringParameters: null }; 
+    const event = { queryStringParameters: null };
     const response = await handler(event);
 
     assert.strictEqual(response.statusCode, 400);
