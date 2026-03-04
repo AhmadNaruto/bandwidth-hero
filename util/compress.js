@@ -1,48 +1,56 @@
-// compress.js - Production-optimized image compression with Sharp
+// compress.js - Production-optimized image compression with Sharp + mozjpeg
+// REFACTORED: Using node-mozjpeg for better JPEG compression
 
 import sharp from "sharp";
+import mozjpeg from "node-mozjpeg";
 import { cpus } from "node:os";
 import logger from "./logger.js";
 
 // Set Sharp concurrency for better performance
-// Use number of CPU cores, but cap at 4 for memory efficiency
-// Can be overridden via SHARP_CONCURRENCY environment variable
 const numCPUs = cpus().length;
 const concurrency = parseInt(process.env.SHARP_CONCURRENCY, 10) || Math.min(numCPUs, 4);
 sharp.concurrency(concurrency);
 
-// Cache frequently used sharp operations (100MB cache)
-// Can be disabled via SHARP_CACHE=0 in environment
+// Cache frequently used sharp operations
 const cacheSize = process.env.SHARP_CACHE === "0" ? 0 : (parseInt(process.env.SHARP_CACHE, 10) || 100 * 1024 * 1024);
 sharp.cache(cacheSize);
 
 // Configuration constants
 const CONFIG = {
-  MAX_WIDTH: 400,
-  MAX_JPEG_HEIGHT: 32767, // JPEG spec limit
-  MAX_AVIF_HEIGHT: 16383, // AVIF spec limit
-  // Sharp default limit: 268,402,689 pixels (16384^2 + 1)
+  MAX_WIDTH: 700,
+  MAX_JPEG_HEIGHT: 32767,
+  MAX_AVIF_HEIGHT: 16383,
   MAX_INPUT_PIXELS: 268402689,
   GRAYSCALE_QUALITY_RANGE: { min: 10, max: 40 },
   DEFAULT_DIMENSIONS: { width: 400, height: 400 },
   DEFAULT_FORMAT: "avif",
-  // Compression timeout (prevent hanging on large images)
   COMPRESSION_TIMEOUT: 15000,
 
-  JPEG_OPTIONS: {
+  // mozjpeg options - optimized for web performance
+  MOZJPEG_OPTIONS: {
     quality: 80,
-    progressive: true, // Better perceived performance
-    mozjpeg: true, // Better compression
-    chromaSubsampling: "4:2:0", // Standard, good compression
-    trellisQuantisation: true, // Better quality
-    overshootDeringing: true, // Reduce artifacts
-    quantisationTable: 3, // Optimized for photos
+    baseline: false, // Use progressive for better perceived performance
+    arithmetic: false, // Better compatibility with baseline
+    progressive: true,
+    optimize_coding: true,
+    smoothing: 0,
+    color_space: mozjpeg.ColorSpace.YCbCr,
+    quant_table: 3, // Optimized for photos (PSNR-HVS-M)
+    trellis_multipass: true, // Better quality at same size
+    trellis_opt_zero: true,
+    trellis_opt_table: true,
+    trellis_loops: 3, // More loops = better compression but slower
+    auto_subsample: true,
+    chroma_subsample: 2, // 4:2:0 subsampling
+    separate_chroma_quality: false,
+    chroma_quality: 75,
   },
 
   AVIF_OPTIONS: {
-    effort: 4, // Balance between speed and compression (0-10)
-    chromaSubsampling: "4:4:4", // Best quality
-    bitdepth: 8, // Standard bit depth
+    effort: 4,
+    chromaSubsampling: "4:2:0",
+    bitdepth: 8,
+    lossless: false,
     force: true,
   },
 };
@@ -62,7 +70,7 @@ const getImageMetadata = async (imagePath) => {
 const calculateDimensions = (metadata, maxWidth) => {
   if (!metadata.width || !metadata.height) return CONFIG.DEFAULT_DIMENSIONS;
   if (metadata.width <= maxWidth) return { width: metadata.width, height: metadata.height };
-  
+
   const ratio = maxWidth / metadata.width;
   return {
     width: Math.round(metadata.width * ratio),
@@ -76,11 +84,51 @@ const selectFormat = (useAvif, calculatedHeight) => {
   return useAvif ? "avif" : "jpeg";
 };
 
-const processImage = async (imagePath, format, quality, grayscale) => {
-  const isJpeg = format === "jpeg";
-  const formatOptions = isJpeg
-    ? { ...CONFIG.JPEG_OPTIONS, quality }
-    : { ...CONFIG.AVIF_OPTIONS, quality };
+// Process image with mozjpeg for JPEG output
+const processImageWithMozjpeg = async (imagePath, quality, grayscale, maxWidth) => {
+  // First, use Sharp to resize and prepare raw RGB data
+  const pipeline = sharp(imagePath, {
+    sequentialRead: true,
+    limitInputPixels: CONFIG.MAX_INPUT_PIXELS,
+    failOnError: false,
+  })
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .resize({
+      kernel: sharp.kernel.lanczos3,
+      width: maxWidth,
+      fit: "inside",
+      withoutEnlargement: true,
+    });
+
+  if (grayscale) {
+    pipeline.grayscale();
+  }
+
+  // Get raw RGB buffer and metadata
+  const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+
+  // Use mozjpeg to encode
+  const options = {
+    ...CONFIG.MOZJPEG_OPTIONS,
+    quality,
+    color_space: grayscale ? mozjpeg.ColorSpace.GRAYSCALE : mozjpeg.ColorSpace.YCbCr,
+  };
+
+  const output = mozjpeg.encodeSync(data, info.width, info.height, options);
+
+  return {
+    data: output,
+    info: {
+      size: output.length,
+      width: info.width,
+      height: info.height,
+    },
+  };
+};
+
+// Process image with Sharp for AVIF output
+const processImageWithSharp = async (imagePath, format, quality, grayscale) => {
+  const formatOptions = { ...CONFIG.AVIF_OPTIONS, quality };
 
   return sharp(imagePath, {
     sequentialRead: true,
@@ -141,12 +189,19 @@ async function compress(imagePath, useAvif, grayscale, quality, originalSize) {
         originalSize,
         effectiveQuality,
         format: finalFormat,
-        mode: finalFormat === "avif" ? "AVIF" : "JPEG"
+        mode: finalFormat === "avif" ? "AVIF" : "mozjpeg",
       });
 
-      const { data, info } = await processImage(imagePath, finalFormat, effectiveQuality, grayscale);
+      let result;
+      if (finalFormat === "jpeg") {
+        // Use mozjpeg for JPEG output
+        result = await processImageWithMozjpeg(imagePath, effectiveQuality, grayscale, CONFIG.MAX_WIDTH);
+      } else {
+        // Use Sharp for AVIF output
+        result = await processImageWithSharp(imagePath, finalFormat, effectiveQuality, grayscale);
+      }
 
-      if (info.size > originalSize) {
+      if (result.info.size > originalSize) {
         return createResponse(
           imagePath,
           metadata.format || CONFIG.DEFAULT_FORMAT,
@@ -156,7 +211,7 @@ async function compress(imagePath, useAvif, grayscale, quality, originalSize) {
         );
       }
 
-      return createResponse(data, finalFormat, info.size, originalSize - info.size, "compressed", originalSize);
+      return createResponse(result.data, finalFormat, result.info.size, originalSize - result.info.size, "compressed", originalSize);
     })();
 
     // Apply timeout to entire compression operation

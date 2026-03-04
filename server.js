@@ -366,7 +366,7 @@ const handleImageRequest = async (event, abortSignal) => {
     compressedSize: finalBuffer.length,
     bytesSaved: contentLength - finalBuffer.length,
     quality,
-    format: compressHeaders?.["content-type"] || (isWebp ? "webp" : "jpeg"),
+    format: compressHeaders?.["content-type"] || (isWebp ? "image/avif" : "image/jpeg"),
   });
 
   return createImageResponse(
