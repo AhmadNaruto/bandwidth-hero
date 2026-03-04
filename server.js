@@ -92,16 +92,20 @@ let baselineHeapUsed = 0;
 
 const checkMemoryHealth = () => {
   const memUsage = process.memoryUsage();
-  const heapUsedPercent = memUsage.heapUsed / memUsage.heapTotal;
   const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
   const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+  
+  // Calculate heap percentage, but don't rely on it solely
+  // V8 pre-allocates heap, so heapUsed/heapTotal can be misleading
+  const heapUsedPercent = memUsage.heapUsed / memUsage.heapTotal;
   
   // Skip first 10 checks to allow Node.js V8 to stabilize (~5 minutes)
   memoryCheckCount++;
   if (memoryCheckCount < 10) {
     if (memoryCheckCount === 1) {
       baselineHeapUsed = heapUsedMB;
-      logger.info("Memory baseline established", { baselineHeapUsed });
+      logger.info("Memory baseline established", { baselineHeapUsed, heapTotalMB });
     }
     return true;
   }
@@ -110,26 +114,29 @@ const checkMemoryHealth = () => {
   if (memoryCircuitBreaker && Date.now() > memoryCircuitBreakerUntil) {
     memoryCircuitBreaker = false;
     logger.warn("Memory circuit breaker reset", { 
-      heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
       heapUsedMB,
+      heapTotalMB,
+      heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
       rssMB 
     });
   }
   
-  // Only trigger if heap is critically high (>90%) OR RSS is very high
-  // This prevents false positives from V8's aggressive heap allocation
-  const isHeapCritical = heapUsedPercent > 0.90;
-  const isRssHigh = rssMB > 1024; // 1GB RSS threshold
+  // Circuit breaker triggers only on actual memory pressure:
+  // 1. RSS > 1.5GB (actual memory usage, not V8 heap)
+  // 2. OR heapUsed > 1GB (absolute, not percentage)
+  // This avoids false positives from V8's aggressive heap pre-allocation
+  const isRssCritical = rssMB > 1536; // 1.5GB
+  const isHeapCritical = heapUsedMB > 1024; // 1GB absolute
   
-  if (!memoryCircuitBreaker && (isHeapCritical || isRssHigh)) {
+  if (!memoryCircuitBreaker && (isRssCritical || isHeapCritical)) {
     memoryCircuitBreaker = true;
     memoryCircuitBreakerUntil = Date.now() + CONFIG.MEMORY_CIRCUIT_BREAKER_COOLDOWN;
     logger.error("Memory circuit breaker triggered", {
       heapUsedMB,
-      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
+      heapTotalMB,
       heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
       rssMB,
-      reason: isHeapCritical ? "heap_critical" : "rss_high",
+      reason: isRssCritical ? "rss_critical" : "heap_critical",
     });
   }
   
@@ -161,21 +168,27 @@ app.use((req, res, next) => {
   
   // Check concurrent request limit
   if (activeRequests >= CONFIG.MAX_CONCURRENT_REQUESTS) {
-    logger.warn("Request rejected - max concurrent requests reached", { 
-      activeRequests, 
-      limit: CONFIG.MAX_CONCURRENT_REQUESTS 
+    logger.warn("Request rejected - max concurrent requests reached", {
+      activeRequests,
+      limit: CONFIG.MAX_CONCURRENT_REQUESTS
     });
     return res.status(503).json({ error: "Service temporarily unavailable - too many requests" });
   }
-  
+
   activeRequests++;
-  res.on("finish", () => {
-    activeRequests--;
-  });
-  res.on("close", () => {
-    activeRequests--;
-  });
+  let decremented = false;
+  const decrement = () => {
+    if (!decremented) {
+      decremented = true;
+      activeRequests--;
+      // Ensure activeRequests never goes negative
+      if (activeRequests < 0) activeRequests = 0;
+    }
+  };
   
+  res.once("finish", decrement);
+  res.once("close", decrement);
+
   next();
 });
 
