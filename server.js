@@ -214,13 +214,15 @@ const createImageResponse = (buffer, contentType, additionalHeaders = {}) => ({
 const parseQueryParams = (queryParams) => {
   if (!queryParams) throw new Error("Missing query parameters");
 
-  const { url: imageUrl, jpeg: jpegParam, bw: grayscaleParam, l: qualityParam } = queryParams;
+  // Support both 'jpeg' and 'jpg' as parameter name (for compatibility)
+  const jpegParam = queryParams.jpeg ?? queryParams.jpg;
+  const { url: imageUrl, bw: grayscaleParam, l: qualityParam } = queryParams;
 
   if (!imageUrl) return { healthCheck: true };
 
   return {
     imageUrl,
-    isWebp: !parseInt(jpegParam, 10),
+    isWebp: !parseInt(jpegParam, 10), // jpeg=1 → isWebp=false → JPEG; jpeg=0 → isWebp=true → AVIF
     isGrayscale: Boolean(parseInt(grayscaleParam, 10)),
     quality: parseInt(qualityParam, 10) || CONFIG.DEFAULT_QUALITY,
   };
