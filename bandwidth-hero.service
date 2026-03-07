@@ -5,10 +5,10 @@ Documentation=https://github.com/your-username/bandwidth-hero-proxy
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/var/www/bandwidth-hero
-ExecStart=/usr/bin/node server.js
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/bandwidth-hero
+ExecStart=/home/ubuntu/.nvm/versions/node/v20.20.0/bin/node --env-file=/home/ubuntu/bandwidth-hero/.env server.js
 Restart=always
 RestartSec=10
 
@@ -17,13 +17,15 @@ Environment=NODE_ENV=production
 Environment=PORT=8080
 Environment=LOG_LEVEL=info
 Environment=LOG_ENABLED=true
+Environment=SHARP_CONCURRENCY=4
+Environment=SHARP_CACHE=104857600
 
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/www/bandwidth-hero/logs
+ProtectHome=false
+ReadWritePaths=/home/ubuntu/bandwidth-hero
 
 # Resource limits
 LimitNOFILE=65535
