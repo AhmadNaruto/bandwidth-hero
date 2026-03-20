@@ -41,6 +41,10 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 | `PORT` | Server port | `8080` |
 | `LOG_LEVEL` | Logging level (error/warn/info/debug/trace) | `info` |
 | `LOG_ENABLED` | Enable logging | `true` |
+| `SHARP_CONCURRENCY` | Number of CPU cores for Sharp to use | `min(CPUs, 4)` |
+| `SHARP_CACHE` | Sharp cache size in bytes | `100MB` |
+
+**Note on User-Agent:** The proxy uses a fixed Android browser User-Agent for all upstream requests. This is intentional to avoid 403 errors from image hosts (Cloudflare, etc.) that block bot traffic. The default UA is: `Mozilla/5.0 (Linux; U; Android 13; zh-CN; PFDM00 Build/TP1A.220905.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/123.0.6312.80 UCBrowser/18.2.6.1452 Mobile Safari/537.36`
 
 ## API Usage
 

@@ -6,7 +6,7 @@ const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 const writeLog = (logEntry) => {
   // JSON.stringify is synchronous but necessary for atomic writes
   // Using stdout.write avoids some overhead of console.log
-  process.stdout.write(JSON.stringify(logEntry) + "\n");
+  Bun.stdout.write(JSON.stringify(logEntry) + "\n");
 };
 
 class Logger {

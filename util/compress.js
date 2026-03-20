@@ -24,7 +24,7 @@ const CONFIG = {
   GRAYSCALE_QUALITY_RANGE: { min: 15, max: 35 },
   DEFAULT_DIMENSIONS: { width: 400, height: 400 },
   DEFAULT_FORMAT: "avif",
-  COMPRESSION_TIMEOUT: 20000,
+  COMPRESSION_TIMEOUT: 120000, // 120 seconds (2 minutes) for large manga images
 
   // mozjpeg options via Sharp - OPTIMIZED FOR MANGA/LINE ART/TEXT
   // Sharp uses mozjpeg internally when mozjpeg option is set

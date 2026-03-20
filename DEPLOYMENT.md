@@ -2,25 +2,23 @@
 
 ## Prerequisites
 - VPS with Ubuntu/Debian or CentOS/RHEL
-- Node.js >= 20.0.0 (21.x recommended)
-- PM2 (process manager) or systemd
+- Bun runtime (latest version)
+- systemd or PM2
 
 ## Quick Start
 
 ### 1. Install Dependencies
 
 ```bash
-# Install Node.js (if not installed)
-# Uses Node.js 21.x (recommended, compatible with >=20.0.0 requirement)
-curl -fsSL https://deb.nodesource.com/setup_21.x | sudo -E bash -
-sudo apt-get install -y nodejs
+# Install Bun
+curl -fsSL https://bun.sh/install | bash
 
 # Clone repository
 git clone https://github.com/your-username/bandwidth-hero-proxy.git
 cd bandwidth-hero-proxy
 
 # Install dependencies
-npm install --production
+bun install --production
 ```
 
 ### 2. Environment Variables (Optional)
@@ -32,57 +30,31 @@ LOG_LEVEL=info
 LOG_ENABLED=true
 ```
 
-### 3. Run with PM2 (Recommended)
+### 3. Run with Bun (Recommended)
 
 ```bash
-# Install PM2 globally
-npm install -g pm2
-
 # Start application
-pm2 start server.js --name bandwidth-hero
-
-# Save PM2 process list
-pm2 save
-
-# Setup PM2 to start on boot
-pm2 startup
+bun run --env-file=.env server.js
 ```
 
 ### 4. Run with systemd
 
-Create service file `/etc/systemd/system/bandwidth-hero.service`:
+Use the provided `bandwidth-hero.service` file:
 
-```ini
-[Unit]
-Description=Bandwidth Hero Proxy
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/var/www/bandwidth-hero
-ExecStart=/usr/bin/node server.js
-Restart=always
-RestartSec=10
-Environment=NODE_ENV=production
-Environment=PORT=8080
-Environment=LOG_LEVEL=info
-
-# Security
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then enable and start:
 ```bash
+# Copy service file
+sudo cp bandwidth-hero.service /etc/systemd/system/
+
+# Reload systemd
 sudo systemctl daemon-reload
+
+# Enable and start
 sudo systemctl enable bandwidth-hero
 sudo systemctl start bandwidth-hero
 sudo systemctl status bandwidth-hero
 ```
+
+The service file is already configured to use Bun.
 
 ### 5. Setup Nginx Reverse Proxy
 
@@ -203,16 +175,17 @@ Log levels: `error`, `warn`, `info`, `debug`, `trace`
 
 ## Performance Tuning
 
-### Increase Node.js Memory (for large images)
+### Increase Bun Memory Limit
 ```bash
-# In systemd service
-ExecStart=/usr/bin/node --max-old-space-size=512 server.js
+# In systemd service, add to ExecStart
+ExecStart=/home/ubuntu/.bun/bin/bun run --max-old-space-size=512 server.js
 ```
 
 ### Adjust Sharp Concurrency
 ```bash
 # Limit sharp threads (default: number of CPU cores)
-export UV_THREADPOOL_SIZE=4
+export SHARP_CONCURRENCY=4
+export SHARP_CACHE=104857600
 ```
 
 ## Security Considerations
@@ -229,8 +202,8 @@ export UV_THREADPOOL_SIZE=4
 # Install build dependencies
 sudo apt-get install -y build-essential libvips-dev
 
-# Rebuild sharp
-npm rebuild sharp
+# Reinstall dependencies
+bun install
 ```
 
 ### Port Already in Use
@@ -244,11 +217,11 @@ sudo kill -9 <PID>
 
 ### Check Service Status
 ```bash
-# PM2
-pm2 status
-
 # systemd
 sudo systemctl status bandwidth-hero
+
+# View logs
+sudo journalctl -u bandwidth-hero -f
 ```
 
 ## Backup & Restore

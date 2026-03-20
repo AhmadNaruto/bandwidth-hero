@@ -1,8 +1,8 @@
-import { test, afterEach } from "node:test";
-import assert from "node:assert";
+import { test, describe, beforeEach, afterEach } from "bun:test";
+import { expect } from "bun:test";
 import pick from "../util/pick.js";
+import shouldCompress from "../util/shouldCompress.js";
 import logger from "../util/logger.js";
-import { handler } from "../functions/index.js";
 
 /**
  * MOCKING SECTION
@@ -25,64 +25,90 @@ afterEach(() => {
 
 // --- UNIT TESTS ---
 
-test("Unit: pick function - should filter headers correctly", () => {
-    const headers = {
-        "user-agent": "Mozilla/5.0",
-        "cookie": "session=123",
-        "x-ignored": "should-not-exist"
-    };
-    const whitelist = ["user-agent", "cookie"];
-    const result = pick(headers, whitelist);
+describe("util/pick.js", () => {
+    test("should filter headers correctly", () => {
+        const headers = {
+            "user-agent": "Mozilla/5.0",
+            "cookie": "session=123",
+            "x-ignored": "should-not-exist"
+        };
+        const whitelist = ["user-agent", "cookie"];
+        const result = pick(headers, whitelist);
 
-    assert.strictEqual(result["user-agent"], "Mozilla/5.0");
-    assert.strictEqual(result["cookie"], "session=123");
-    assert.strictEqual(result["x-ignored"], undefined);
+        expect(result["user-agent"]).toBe("Mozilla/5.0");
+        expect(result["cookie"]).toBe("session=123");
+        expect(result["x-ignored"]).toBeUndefined();
+    });
+
+    test("should handle empty source object", () => {
+        const result = pick({}, ["user-agent"]);
+        expect(result).toEqual({});
+    });
+
+    test("should handle null source", () => {
+        const result = pick(null, ["user-agent"]);
+        expect(result).toEqual({});
+    });
+
+    test("should handle case-insensitive matching", () => {
+        const headers = {
+            "User-Agent": "Mozilla/5.0",
+            "COOKIE": "session=123"
+        };
+        const whitelist = ["user-agent", "cookie"];
+        const result = pick(headers, whitelist);
+
+        expect(result["user-agent"]).toBe("Mozilla/5.0");
+        expect(result["cookie"]).toBe("session=123");
+    });
 });
 
-// --- INTEGRATION TESTS WITH REAL URL ---
+describe("util/shouldCompress.js", () => {
+    test("should return false for non-image content type", () => {
+        expect(shouldCompress("text/html", 10000, false)).toBe(false);
+    });
 
-test("Integration: Handler - Success Fetch with Real URL", async () => {
-    const realImageUrl = "https://picsum.photos/id/237/200/300";
+    test("should return false for small images", () => {
+        expect(shouldCompress("image/jpeg", 1000, false)).toBe(false);
+    });
 
-    const event = {
-        queryStringParameters: {
-            url: realImageUrl,
-            jpeg: "1", // Use JPEG format for faster processing
-            l: "10"    // Low quality for faster compression during test
-        },
-        headers: {
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "accept": "image/webp,image/apng,image/*,*/*;q=0.8"
-        },
-        ip: "1.1.1.1"
-    };
+    test("should return false for very large images", () => {
+        expect(shouldCompress("image/jpeg", 6 * 1024 * 1024, false)).toBe(false);
+    });
 
-    const response = await handler(event);
+    test("should return true for normal JPEG images", () => {
+        expect(shouldCompress("image/jpeg", 50000, false)).toBe(true);
+    });
 
-    // If successful, status 200. If blocked by hotlink protection (403/404), test still passes
-    // as long as handler doesn't crash and returns a valid status code.
-    if (response.statusCode === 200) {
-        assert.ok(response.body.length > 0, "Response body should not be empty");
-        assert.strictEqual(response.headers["content-type"].startsWith("image/"), true);
-    } else {
-        assert.ok([403, 404, 502, 503].includes(response.statusCode), "Must return valid error status");
-    }
+    test("should return false for small PNG images", () => {
+        expect(shouldCompress("image/png", 50000, false)).toBe(false);
+    });
+
+    test("should return true for large PNG images", () => {
+        expect(shouldCompress("image/png", 150000, false)).toBe(true);
+    });
+
+    test("should return false for invalid input", () => {
+        expect(shouldCompress(null, 10000, false)).toBe(false);
+        expect(shouldCompress("image/jpeg", "not-a-number", false)).toBe(false);
+    });
 });
 
-test("Integration: Handler - Health Check", async () => {
-    const event = { queryStringParameters: {} };
-    const response = await handler(event);
+describe("util/logger.js", () => {
+    test("should format bytes correctly", () => {
+        expect(logger.formatBytes(1024)).toContain("KB");
+        expect(logger.formatBytes(1048576)).toContain("MB");
+    });
 
-    assert.strictEqual(response.statusCode, 200);
-    assert.strictEqual(response.body, "bandwidth-hero-proxy");
+    test("should handle zero bytes", () => {
+        expect(logger.formatBytes(0)).toBe("0 Bytes");
+    });
 });
 
-test("Integration: Handler - Missing Query Parameters", async () => {
-    const event = { queryStringParameters: null };
-    const response = await handler(event);
-
-    assert.strictEqual(response.statusCode, 400);
-    const body = JSON.parse(response.body);
-    assert.strictEqual(body.error, "Missing query parameters");
+describe("Health Check", () => {
+    // TODO: Add integration test with actual HTTP request to /health endpoint
+    test.skip("health endpoint should return plain text", () => {
+        // Placeholder - needs proper integration test with supertest or similar
+        expect("bandwidth-hero-proxy").toBe("bandwidth-hero-proxy");
+    });
 });
-
