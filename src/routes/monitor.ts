@@ -632,6 +632,7 @@ function getMonitorHtml() {
     
     // Poll logs every 2 seconds - client-side processing
     function pollLogs() {
+      console.log('Polling logs...');
       fetch('/monitor/logs?limit=100')
         .then(r => r.json())
         .then(data => {
@@ -654,13 +655,16 @@ function getMonitorHtml() {
         });
     }
     function renderLogs(logs) {
-      const emptyState = logContainer.querySelector('.empty-state');
+      console.log('Rendering', logs.length, 'logs');
+      // Always clear and re-render
+      logContainer.innerHTML = '';
+      
       if (logs.length === 0) {
-        if (!emptyState) logContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📡</div><div>No logs yet</div></div>';
+        logContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📡</div><div>No logs yet</div></div>';
         return;
       }
-      if (emptyState) emptyState.remove();
-      logContainer.innerHTML = '';
+      
+      // Render all logs
       logs.forEach(log => {
         const entry = document.createElement('div');
         entry.className = 'log-entry';
@@ -670,7 +674,10 @@ function getMonitorHtml() {
           getMetadataHtml(log);
         logContainer.appendChild(entry);
       });
+      
+      // Scroll to top (newest first)
       if (autoScrollCheckbox.checked) logContainer.scrollTop = 0;
+      console.log('Rendered', logs.length, 'logs to container');
     }
     function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
     function getMetadataHtml(log) {
