@@ -32,14 +32,14 @@ const CONFIG = {
 
   // Queue configuration
   QUEUE_ENABLED: true,
-  WORKER_COUNT: 3,
-  WORKER_MIN_DELAY: 500,
-  WORKER_MAX_DELAY: 1000,
-  QUEUE_MAX_SIZE: 100,
+  WORKER_COUNT: 50,  // Workers for parallel upstream requests
+  WORKER_MIN_DELAY: 100,  // Reduced for faster processing
+  WORKER_MAX_DELAY: 300,
+  QUEUE_MAX_SIZE: 200,  // Larger queue for traffic spikes
   QUEUE_TIMEOUT: 120000,
 
-  // Rate limiting
-  MAX_CONCURRENT_REQUESTS: 100,
+  // Rate limiting - should match or be less than worker count
+  MAX_CONCURRENT_REQUESTS: 50,
 } as const;
 
 // Initialize queue
