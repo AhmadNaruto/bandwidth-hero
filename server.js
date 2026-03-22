@@ -1,5 +1,7 @@
 // server.js - Production-ready Express server for VPS deployment
 // REFACTORED: Memory-safe, stable for 24/7 operation
+// NOTE: This server should only be run via systemd. Do not run manually.
+
 import express from "express";
 import { createServer, Agent } from "http";
 import { Agent as HttpsAgent } from "https";
@@ -12,6 +14,15 @@ import shouldCompress from "./util/shouldCompress.js";
 import compressImage from "./util/compress.js";
 import logger from "./util/logger.js";
 
+// Guard: Only allow running via systemd in production
+const isSystemdManaged = process.env.INVOCATION_ID || process.env.JOURNAL_STREAM || process.env.SYSTEMD_EXEC_PID;
+const isProduction = process.env.NODE_ENV === "production";
+
+if (isProduction && !isSystemdManaged) {
+  logger.error("Server must be run via systemd in production. Use: sudo systemctl start bandwidth-hero");
+  process.exit(1);
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -20,20 +31,8 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 const CONFIG = {
   BYPASS_THRESHOLD: 10240,
   DEFAULT_QUALITY: 40,
-  FETCH_HEADERS_TO_PICK: ["cookie", "dnt", "referer", "user-agent", "accept", "accept-language", "origin"],
   REQUEST_TIMEOUT: 60000,
   MAX_REQUEST_SIZE: "10mb",
-
-  // Default User-Agent for all upstream requests (Android browser to avoid 403)
-  DEFAULT_USER_AGENT: "Mozilla/5.0 (Linux; U; Android 13; zh-CN; PFDM00 Build/TP1A.220905.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/123.0.6312.80 UCBrowser/18.2.6.1452 Mobile Safari/537.36",
-
-  // Site-specific referer rules for hotlink protection
-  REFERER_RULES: {
-    "westmanga.blog": "https://westmanga.blog/",
-    "wp.com": "https://mangadex.org/",
-    "imgur.com": "https://imgur.com/",
-    "blogspot.com": "https://www.blogspot.com/",
-  },
 
   // Connection pooling limits
   HTTP_MAX_SOCKETS: 50,
@@ -42,9 +41,6 @@ const CONFIG = {
 
   // Concurrency limits
   MAX_CONCURRENT_REQUESTS: 100,
-
-  // Memory monitoring
-  MEMORY_CHECK_INTERVAL: 30000,
 
   // Request queue - worker pool for upstream requests
   QUEUE_ENABLED: true,
@@ -89,24 +85,6 @@ app.use((req, res, next) => {
   });
   next();
 });
-
-// Memory monitoring
-let memoryCheckCount = 0;
-
-const checkMemoryHealth = () => {
-  return true;
-};
-
-// Periodic memory health check
-setInterval(() => {
-  const memUsage = process.memoryUsage();
-  logger.debug("Memory status", {
-    heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
-    heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
-    heapUsedPercent: ((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(2),
-    rss: Math.round(memUsage.rss / 1024 / 1024),
-  });
-}, CONFIG.MEMORY_CHECK_INTERVAL);
 
 // Periodic queue metrics reset (prevent overflow, reset hourly)
 setInterval(() => {
@@ -349,9 +327,25 @@ const createImageResponse = (buffer, contentType, additionalHeaders = {}) => ({
   headers: {
     "content-type": contentType,
     "content-length": buffer.length,
+    // No caching - let nginx handle caching at port 80
+    "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    "pragma": "no-cache",
+    "expires": "0",
+    // Remove any ETag that might come from additionalHeaders
     ...additionalHeaders,
   },
 });
+
+// Ensure no cache headers leak through
+const sanitizeResponseHeaders = (headers) => {
+  const sanitized = { ...headers };
+  delete sanitized.etag;
+  delete sanitized["x-cache"];
+  delete sanitized.via;
+  delete sanitized["x-varnish"];
+  delete sanitized.age;
+  return sanitized;
+};
 
 const parseQueryParams = (queryParams) => {
   if (!queryParams) throw new Error("Missing query parameters");
@@ -413,16 +407,11 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
     }
   }
 
-  // Pick headers from client request
+  // Pick headers from client request - forward ALL headers to upstream
   const fetchHeaders = {
-    ...pick(headers, CONFIG.FETCH_HEADERS_TO_PICK),
+    ...headers,
     "x-forwarded-for": headers["x-forwarded-for"] || ip,
-    // Always forward accept-encoding from client (important for Cloudflare/CDN)
-    "accept-encoding": headers["accept-encoding"] || "gzip, deflate, br",
   };
-
-  // Always use default User-Agent to avoid 403 from upstream servers
-  fetchHeaders["user-agent"] = CONFIG.DEFAULT_USER_AGENT;
 
   // DEBUG: Log incoming headers from client
   logger.debug("Incoming client headers", {
@@ -433,34 +422,14 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
     ip,
   });
 
-  // Auto-add Referer header if not present (for hotlink protection)
-  // Many manga sites require referer from their own domain
-  if (!fetchHeaders["referer"]) {
-    try {
-      const urlObj = new URL(url);
-      const host = urlObj.host;
-
-      // Check for site-specific referer rules first
-      let referer = null;
-      for (const [domain, ref] of Object.entries(CONFIG.REFERER_RULES)) {
-        if (host.includes(domain)) {
-          referer = ref;
-          break;
-        }
-      }
-
-      // Fall back to auto-generated referer if no rule found
-      if (!referer) {
-        referer = `${urlObj.protocol}//${urlObj.host}/`;
-      }
-
-      fetchHeaders["referer"] = referer;
-      logger.debug("Auto-added referer header", { url, referer, host });
-    } catch (e) {
-      // Ignore invalid URLs
-      logger.warn("Failed to add referer header", { url, error: e.message });
-    }
-  }
+  // Remove hop-by-hop headers that should not be forwarded
+  delete fetchHeaders["host"];
+  delete fetchHeaders["connection"];
+  delete fetchHeaders["keep-alive"];
+  delete fetchHeaders["transfer-encoding"];
+  delete fetchHeaders["upgrade"];
+  delete fetchHeaders["te"];
+  delete fetchHeaders["trailer"];
 
   // DEBUG: Log headers being sent to upstream
   logger.debug("Headers sent to upstream", {
@@ -619,9 +588,21 @@ const processUpstreamResponse = async (fetchResult, url) => {
   }
 
   const upstreamHeaders = Object.fromEntries(response.headers.entries());
+  // Remove hop-by-hop and encoding headers
   delete upstreamHeaders["content-encoding"];
   delete upstreamHeaders["transfer-encoding"];
   delete upstreamHeaders["x-encoded-content-encoding"];
+  // Remove cache headers - let nginx handle caching
+  delete upstreamHeaders["cache-control"];
+  delete upstreamHeaders["expires"];
+  delete upstreamHeaders["etag"];
+  delete upstreamHeaders["last-modified"];
+  delete upstreamHeaders["age"];
+  delete upstreamHeaders["x-cache"];
+  delete upstreamHeaders["x-served-by"];
+  delete upstreamHeaders["x-timer"];
+  delete upstreamHeaders["via"];
+  delete upstreamHeaders["server"];
 
   const contentType = response.headers.get("content-type") || "";
   const buffer = fetchedBuffer || await response.arrayBuffer();
@@ -669,7 +650,7 @@ const handleImageRequest = async (event, abortSignal) => {
   if (bypassCheck.bypass) {
     logger.logBypass({ url: imageUrl, size: contentLength, reason: bypassCheck.reason });
     return createImageResponse(buffer, contentType, {
-      ...upstreamHeaders,
+      ...sanitizeResponseHeaders(upstreamHeaders),
       "x-bypass-reason": bypassCheck.reason,
       "x-url-hash": urlHash,
     });
@@ -701,7 +682,12 @@ const handleImageRequest = async (event, abortSignal) => {
   return createImageResponse(
     finalBuffer,
     compressHeaders?.["content-type"] || contentType,
-    { ...upstreamHeaders, ...compressHeaders, "x-compressed-by": "bandwidth-hero", "x-url-hash": urlHash }
+    {
+      ...sanitizeResponseHeaders(upstreamHeaders),
+      ...compressHeaders,
+      "x-compressed-by": "bandwidth-hero",
+      "x-url-hash": urlHash,
+    }
   );
 };
 
@@ -711,15 +697,10 @@ app.get("/health", (req, res) => {
   res.send("bandwidth-hero-proxy");
 });
 
-// Readiness check endpoint (includes memory health)
+// Readiness check endpoint
 app.get("/ready", (req, res) => {
-  const isHealthy = checkMemoryHealth();
   res.set("Content-Type", "text/plain");
-  if (isHealthy) {
-    res.send("ok");
-  } else {
-    res.status(503).send("unavailable");
-  }
+  res.send("ok");
 });
 
 // Queue status endpoint
@@ -748,17 +729,10 @@ app.get("/queue/status", (req, res) => {
 
 // Comprehensive health check endpoint
 app.get("/health/detailed", (req, res) => {
-  const memUsage = process.memoryUsage();
   const busyWorkers = workers.filter(w => w.busy).length;
   const health = {
     status: "ok",
     uptime: process.uptime(),
-    memory: {
-      heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024),
-      heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
-      heapUsedPercent: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100),
-      rss: Math.round(memUsage.rss / 1024 / 1024),
-    },
     queue: {
       size: requestQueue.length,
       workers: {
@@ -772,15 +746,9 @@ app.get("/health/detailed", (req, res) => {
     timestamp: new Date().toISOString(),
   };
 
-  // Determine health status
-  const isRssCritical = health.memory.rss > 1536;
-  const isHeapCritical = health.memory.heapUsed > 1024;
   const isQueueFull = requestQueue.length >= CONFIG.QUEUE_MAX_SIZE;
 
-  if (isRssCritical || isHeapCritical) {
-    health.status = "degraded";
-    res.status(503);
-  } else if (isQueueFull) {
+  if (isQueueFull) {
     health.status = "busy";
     res.status(429);
   }
@@ -959,7 +927,6 @@ server.listen(PORT, () => {
       maxDelay: `${CONFIG.WORKER_MAX_DELAY}ms`,
     },
     maxConcurrentRequests: CONFIG.MAX_CONCURRENT_REQUESTS,
-    memoryThreshold: `${CONFIG.MEMORY_THRESHOLD_PERCENT * 100}%`,
   });
 });
 
@@ -969,19 +936,5 @@ server.on("error", (err) => {
     code: err.code
   });
 });
-
-// Log memory stats periodically in production
-if (NODE_ENV === "production") {
-  setInterval(() => {
-    const memUsage = process.memoryUsage();
-    logger.info("Memory stats", {
-      heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
-      heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
-      heapUsedPercent: `${((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(2)}%`,
-      rss: `${Math.round(memUsage.rss / 1024 / 1024)}MB`,
-      activeRequests,
-    });
-  }, 60000); // Every minute
-}
 
 export default app;

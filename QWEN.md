@@ -15,8 +15,8 @@
 ### Tech Stack
 - **Runtime**: Bun >= 1.0.0 (ES Modules)
 - **Framework**: Express.js
-- **Image Processing**: Sharp
-- **HTTP Client**: Got
+- **Image Processing**: @napi-rs/image (N-API based high-performance image library)
+- **HTTP Client**: Wretch
 - **Testing**: Bun test
 
 ## Project Structure
@@ -24,7 +24,7 @@
 ```
 bandwidth-hero/
 ├── util/
-│   ├── compress.js       # Image compression logic using Sharp
+│   ├── compress.js       # Image compression logic using @napi-rs/image
 │   ├── logger.js         # Structured logging system
 │   ├── pick.js           # Case-insensitive object property picker
 │   └── shouldCompress.js # Compression decision logic
@@ -120,6 +120,13 @@ Images are **bypassed** (not compressed) when:
 - Compressed output would be larger than original
 - PNG/GIF without transparency and < 100KB
 
+**Image Processing with @napi-rs/image:**
+- Uses `Transformer` class for method chaining
+- Resize with Lanczos3 filter (best quality)
+- AVIF encoding with configurable quality, speed, and chroma subsampling
+- JPEG encoding with quality control
+- Grayscale conversion via `.grayscale()` method
+
 ### Header Forwarding
 The following headers are forwarded to upstream servers for Cloudflare compatibility:
 - `user-agent`, `accept`, `accept-language`, `accept-encoding`
@@ -158,8 +165,8 @@ LOG_ENABLED=true
 3. Review `x-compression-status` and `x-bypass-reason` headers in responses
 
 ## External Dependencies
-- [Sharp](https://github.com/lovell/sharp) - High-performance image processing
-- [Got](https://github.com/sindresorhus/got) - HTTP client
+- [@napi-rs/image](https://image.napi.rs/) - High-performance N-API based image processing
+- [Wretch](https://github.com/elbywan/wretch) - HTTP client with chainable API
 - [Express](https://expressjs.com/) - Web framework
 
 ## Related Projects

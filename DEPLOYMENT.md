@@ -1,5 +1,9 @@
 # VPS Deployment Guide
 
+## ⚠️ Important: systemd Required
+
+This server **must be run via systemd** in production. Manual execution is blocked when `NODE_ENV=production` to ensure proper process management, logging, and automatic restarts.
+
 ## Prerequisites
 - VPS with Ubuntu/Debian or CentOS/RHEL
 - Bun runtime (latest version)
@@ -30,14 +34,7 @@ LOG_LEVEL=info
 LOG_ENABLED=true
 ```
 
-### 3. Run with Bun (Recommended)
-
-```bash
-# Start application
-bun run --env-file=.env server.js
-```
-
-### 4. Run with systemd
+### 3. Run with systemd (Required for Production)
 
 Use the provided `bandwidth-hero.service` file:
 
@@ -54,9 +51,11 @@ sudo systemctl start bandwidth-hero
 sudo systemctl status bandwidth-hero
 ```
 
-The service file is already configured to use Bun.
+The service file is already configured to use Bun with proper environment variables.
 
-### 5. Setup Nginx Reverse Proxy
+> **Note**: Manual execution with `bun run server.js` is **blocked** in production mode (`NODE_ENV=production`). The server will exit with an error if not managed by systemd.
+
+### 4. Setup Nginx Reverse Proxy
 
 Install Nginx:
 ```bash
@@ -114,7 +113,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 6. Setup SSL with Let's Encrypt
+### 5. Setup SSL with Let's Encrypt
 
 ```bash
 sudo apt-get install certbot python3-certbot-nginx
@@ -170,18 +169,20 @@ Log levels: `error`, `warn`, `info`, `debug`, `trace`
 
 ## Performance Tuning
 
-### Increase Bun Memory Limit
-```bash
-# In systemd service, add to ExecStart
-ExecStart=/home/ubuntu/.bun/bin/bun run --max-heap-size=512M server.js
+### Adjust Process Priority
+
+The systemd service file already includes `Nice=-5` for higher priority. Adjust if needed:
+
+```ini
+# In systemd service file
+Nice=-5  # Lower value = higher priority (range: -20 to 19)
 ```
 
-### Adjust Sharp Concurrency
-```bash
-# Limit sharp threads (default: number of CPU cores)
-export SHARP_CONCURRENCY=4
-export SHARP_CACHE=104857600
-```
+### Resource Limits
+
+The service file includes these limits:
+- `LimitNOFILE=65535` - Maximum open file descriptors
+- `ReadWritePaths=/home/ubuntu/bandwidth-hero-bun` - Restrict write access to app directory only
 
 ## Security Considerations
 
@@ -192,13 +193,13 @@ export SHARP_CACHE=104857600
 
 ## Troubleshooting
 
-### Sharp Build Issues
-```bash
-# Install build dependencies
-sudo apt-get install -y build-essential libvips-dev
+### Server Won't Start
 
-# Reinstall dependencies
-bun install
+Check if running manually (not allowed in production):
+```bash
+# If NODE_ENV=production, server must be run via systemd
+sudo systemctl start bandwidth-hero
+sudo systemctl status bandwidth-hero
 ```
 
 ### Port Already in Use
@@ -208,6 +209,9 @@ sudo lsof -i :8080
 
 # Kill process
 sudo kill -9 <PID>
+
+# Restart systemd service
+sudo systemctl restart bandwidth-hero
 ```
 
 ### Check Service Status
@@ -218,6 +222,18 @@ sudo systemctl status bandwidth-hero
 # View logs
 sudo journalctl -u bandwidth-hero -f
 ```
+
+### Manual Execution Error
+
+If you see "Server must be run via systemd", either:
+1. Use systemd (recommended for production):
+   ```bash
+   sudo systemctl start bandwidth-hero
+   ```
+2. Or set `NODE_ENV=development` for local testing:
+   ```bash
+   NODE_ENV=development bun run server.js
+   ```
 
 ## Backup & Restore
 

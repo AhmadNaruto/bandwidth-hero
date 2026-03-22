@@ -1,18 +1,8 @@
 // compress.js - Production-optimized image compression for Manga/Webtoon/Comics
-// REFACTORED: Using Sharp's built-in mozjpeg for stability (no native addons)
+// REFACTORED: Using @napi-rs/image for high-performance N-API based image processing
 
-import sharp from "sharp";
-import { cpus } from "node:os";
+import { Transformer } from "@napi-rs/image";
 import logger from "./logger.js";
-
-// Set Sharp concurrency for better performance
-const numCPUs = cpus().length;
-const concurrency = parseInt(process.env.SHARP_CONCURRENCY, 10) || Math.min(numCPUs, 4);
-sharp.concurrency(concurrency);
-
-// Cache frequently used sharp operations
-const cacheSize = process.env.SHARP_CACHE === "0" ? 0 : (parseInt(process.env.SHARP_CACHE, 10) || 100 * 1024 * 1024);
-sharp.cache(cacheSize);
 
 // Configuration constants - OPTIMIZED FOR MANGA/WEBTOON/COMICS
 const CONFIG = {
@@ -26,35 +16,33 @@ const CONFIG = {
   DEFAULT_FORMAT: "avif",
   COMPRESSION_TIMEOUT: 120000, // 120 seconds (2 minutes) for large manga images
 
-  // mozjpeg options via Sharp - OPTIMIZED FOR MANGA/LINE ART/TEXT
-  // Sharp uses mozjpeg internally when mozjpeg option is set
-  JPEG_OPTIONS: {
-    quality: 75,
-    progressive: true, // Better perceived loading
-    mozjpeg: true, // Enable mozjpeg optimizations
-    chromaSubsampling: '4:2:0', // Reduce color resolution (saves space)
-    trellisQuantisation: true, // Better quality/size tradeoff
-    overshootDeringing: true, // Reduce ringing artifacts
-    quantisationTable: 2, // Table 2: better for graphics/text
-  },
-
   // AVIF options - good for color webtoons
+  // speed: 1=slowest/best quality, 10=fastest/worst quality
   AVIF_OPTIONS: {
     quality: 75,
-    effort: 6, // Higher effort for better compression
-    chromaSubsampling: '4:2:0',
-    bitdepth: 8,
-    lossless: false,
+    alphaQuality: 90,
+    speed: 4, // Balanced speed/quality
+    chromaSubsampling: 2, // Yuv420 - good for photos/comics
+  },
+
+  // JPEG quality settings
+  JPEG_QUALITY: {
+    DEFAULT: 75,
+    GRAYSCALE_MIN: 15,
+    GRAYSCALE_MAX: 35,
   },
 };
 
 // Helper functions
-const getImageMetadata = async (imagePath) => {
+const getImageMetadata = async (imageBuffer) => {
   try {
-    return await sharp(imagePath, {
-      sequentialRead: true,
-      limitInputPixels: CONFIG.MAX_INPUT_PIXELS,
-    }).metadata();
+    const transformer = new Transformer(imageBuffer);
+    const metadata = await transformer.metadata();
+    return {
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+    };
   } catch {
     return { ...CONFIG.DEFAULT_DIMENSIONS, format: CONFIG.DEFAULT_FORMAT };
   }
@@ -77,33 +65,50 @@ const selectFormat = (useAvif, calculatedHeight) => {
   return useAvif ? "avif" : "jpeg";
 };
 
-// Process image with Sharp (uses mozjpeg internally for JPEG)
-const processImage = async (imagePath, format, quality, grayscale) => {
-  const isJpeg = format === "jpeg";
-  const formatOptions = isJpeg
-    ? { ...CONFIG.JPEG_OPTIONS, quality }
-    : { ...CONFIG.AVIF_OPTIONS, quality };
+// Process image with @napi-rs/image
+const processImage = async (imageBuffer, format, quality, grayscale) => {
+  try {
+    // Create transformer from image buffer
+    let transformer = new Transformer(imageBuffer);
 
-  const pipeline = sharp(imagePath, {
-    sequentialRead: true,
-    limitInputPixels: CONFIG.MAX_INPUT_PIXELS,
-    failOnError: false,
-  })
-    .flatten({ background: { r: 255, g: 255, b: 255 } })
-    .resize({
-      kernel: sharp.kernel.lanczos3,
-      width: CONFIG.MAX_WIDTH,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
+    // Get metadata for dimension calculation
+    const metadata = await transformer.metadata();
+    const { width, height } = calculateDimensions(metadata, CONFIG.MAX_WIDTH);
 
-  if (grayscale) {
-    pipeline.grayscale();
+    // Apply transformations in chain
+    // Note: @napi-rs/image resize uses Lanczos3 by default for best quality
+    transformer = transformer.resize(width, height, null);
+
+    // Apply grayscale if needed
+    if (grayscale) {
+      transformer = transformer.grayscale();
+    }
+
+    // Convert to target format
+    let outputBuffer;
+    if (format === "jpeg") {
+      outputBuffer = await transformer.jpeg(quality);
+    } else {
+      // AVIF
+      outputBuffer = await transformer.avif({
+        quality: quality,
+        alphaQuality: CONFIG.AVIF_OPTIONS.alphaQuality,
+        speed: CONFIG.AVIF_OPTIONS.speed,
+        chromaSubsampling: CONFIG.AVIF_OPTIONS.chromaSubsampling,
+      });
+    }
+
+    return {
+      data: outputBuffer,
+      info: {
+        size: outputBuffer.length,
+        format: format,
+      },
+    };
+  } catch (error) {
+    logger.error("Image processing failed", { error: error.message });
+    throw error;
   }
-
-  return pipeline
-    .toFormat(format, formatOptions)
-    .toBuffer({ resolveWithObject: true });
 };
 
 const createResponse = (output, format, size, bytesSaved, status, originalSize = null) => ({
@@ -148,7 +153,7 @@ async function compress(imagePath, useAvif, grayscale, quality, originalSize) {
         originalSize,
         effectiveQuality,
         format: finalFormat,
-        mode: finalFormat === "avif" ? "AVIF" : "mozjpeg",
+        mode: finalFormat === "avif" ? "AVIF" : "JPEG",
       });
 
       const { data, info } = await processImage(imagePath, finalFormat, effectiveQuality, grayscale);

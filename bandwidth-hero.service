@@ -17,8 +17,6 @@ Environment=NODE_ENV=production
 Environment=PORT=8080
 Environment=LOG_LEVEL=debug
 Environment=LOG_ENABLED=true
-Environment=SHARP_CONCURRENCY=4
-Environment=SHARP_CACHE=104857600
 
 # Security hardening
 NoNewPrivileges=true
