@@ -15,6 +15,9 @@ interface LogEntry {
 const logBuffer: LogEntry[] = [];
 const MAX_BUFFER_SIZE = 100;
 
+// SSE clients for real-time broadcast
+const sseClients: Set<(data: string) => void> = new Set();
+
 // Callback for monitor route
 let onLogCallback: ((log: LogEntry) => void) | null = null;
 
@@ -26,11 +29,33 @@ export function getLogBuffer(): LogEntry[] {
   return logBuffer;
 }
 
+export function addSSEClient(sendFn: (data: string) => void): () => void {
+  sseClients.add(sendFn);
+  return () => sseClients.delete(sendFn);
+}
+
+export function broadcastToSSE(log: LogEntry) {
+  const data = JSON.stringify(log);
+  const message = `data: ${data}\n\n`;
+  sseClients.forEach(sendFn => {
+    try {
+      sendFn(message);
+    } catch (e) {
+      // Client disconnected
+    }
+  });
+}
+
 export function addLogToBuffer(log: LogEntry) {
   logBuffer.push(log);
   if (logBuffer.length > MAX_BUFFER_SIZE) {
     logBuffer.shift();
   }
+  
+  // Broadcast to all SSE clients in real-time
+  broadcastToSSE(log);
+  
+  // Notify monitor
   if (onLogCallback) {
     onLogCallback(log);
   }
@@ -39,7 +64,7 @@ export function addLogToBuffer(log: LogEntry) {
 const writeLog = (logEntry: LogEntry) => {
   Bun.stdout.write(JSON.stringify(logEntry) + "\n");
   
-  // Add to buffer for monitor
+  // Add to buffer and broadcast to SSE clients
   addLogToBuffer(logEntry);
 };
 

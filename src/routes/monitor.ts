@@ -19,23 +19,26 @@ export function monitorRoute() {
       });
     })
 
-    // Raw SSE Endpoint (for programmatic access)
-    .get("/sse", () => {
-      const headers = {
+    // Raw SSE Endpoint (for programmatic access) - REAL-TIME!
+    .get("/sse", ({ set }) => {
+      set.headers = {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         "connection": "keep-alive",
+        "access-control-allow-origin": "*",
       };
 
       const encoder = new TextEncoder();
+      
+      // Create stream that broadcasts to client
       const stream = new ReadableStream({
         start(controller) {
+          const encoder = new TextEncoder();
+          
           // Send initial buffer
-          const logs: any[] = getLogBuffer();
+          const logs = getLogBuffer();
           logs.forEach((log: any) => {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(log)}\n\n`)
-            );
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(log)}\n\n`));
           });
 
           // Keep connection alive
@@ -47,7 +50,14 @@ export function monitorRoute() {
         },
       });
 
-      return new Response(stream, { headers });
+      return new Response(stream, { 
+        headers: {
+          "content-type": "text/event-stream",
+          "cache-control": "no-cache",
+          "connection": "keep-alive",
+          "access-control-allow-origin": "*",
+        }
+      });
     })
 
     // Get recent logs (REST API)
@@ -630,7 +640,7 @@ function getMonitorHtml() {
     const autoScrollCheckbox = document.getElementById('autoScroll');
     const statusDot = document.querySelector('.status-indicator');
     const statusText = document.querySelector('.status-indicator + span');
-    const eventSource = new EventSource('/monitor/stream');
+    const eventSource = new EventSource('/monitor/sse');
     eventSource.onmessage = (event) => {
       try {
         const log = JSON.parse(event.data);
