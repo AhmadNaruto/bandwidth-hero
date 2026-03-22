@@ -81,7 +81,7 @@ function getMonitorHtml() {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Bandwidth Hero - Log Monitor</title>
   <style>
     :root {
@@ -409,6 +409,93 @@ function getMonitorHtml() {
       font-size: 48px;
       margin-bottom: 16px;
       opacity: 0.5;
+    }
+
+    /* Mobile Responsive Design */
+    @media (max-width: 768px) {
+      body { padding: 12px; }
+      .container { max-width: 100%; }
+      h1 {
+        font-size: 20px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .stats {
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .stat-card { padding: 16px; }
+      .stat-value { font-size: 28px; }
+      .filters {
+        padding: 12px;
+        gap: 6px;
+      }
+      .filter-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+        flex: 1 1 calc(33.333% - 4px);
+        min-width: 80px;
+      }
+      .auto-scroll {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px;
+      }
+      .checkbox-wrapper {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .clear-btn {
+        width: 100%;
+        margin-left: 0;
+      }
+      .log-entry {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 12px;
+      }
+      .log-time {
+        font-size: 11px;
+        opacity: 0.7;
+      }
+      .log-level {
+        align-self: flex-start;
+        padding: 3px 8px;
+        font-size: 11px;
+      }
+      .log-message {
+        font-size: 12px;
+      }
+      .log-metadata {
+        grid-column: 1 / -1;
+        font-size: 10px;
+        gap: 6px;
+      }
+      .metadata-item {
+        padding: 2px 6px;
+        font-size: 10px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      body { padding: 8px; }
+      h1 { font-size: 18px; }
+      .stat-value { font-size: 24px; }
+      .stat-label { font-size: 11px; }
+      .filter-btn {
+        flex: 1 1 calc(50% - 4px);
+        font-size: 11px;
+        padding: 6px 10px;
+      }
+      .log-container {
+        padding: 12px;
+        max-height: 60vh;
+      }
+      .empty-state { padding: 40px 16px; }
+      .empty-state-icon { font-size: 40px; }
     }
   </style>
 </head>
