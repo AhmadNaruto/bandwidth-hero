@@ -442,16 +442,7 @@ const generateUrlHash = (url) => crypto.createHash("sha256").update(url).digest(
 // Configure got with proper agents and limits
 const fetchWithRetry = got.extend({
   retry: {
-    limit: 2,
-    methods: ["GET"],
-    statusCodes: [408, 429, 500, 502, 503, 504],
-    calculateDelay: ({ attemptCount, errorCode, error, retryOptions }) => {
-      if (error?.response?.statusCode >= 400 && error.response.statusCode < 500 && error.response.statusCode !== 429) {
-        return 0;
-      }
-      const delay = Math.min(retryOptions.maxRetryAfter || 2000, 100 * Math.pow(2, attemptCount - 1));
-      return delay;
-    },
+    limit: 0, // No automatic retry - we handle it manually
   },
   timeout: {
     request: CONFIG.REQUEST_TIMEOUT - 5000, // Leave 5s buffer for processing
@@ -575,86 +566,147 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
     fetchHeaders["sec-fetch-dest"] = "image";
   }
 
-  try {
-    const response = await fetchWithRetry(url, {
-      headers: fetchHeaders,
-      responseType: "buffer",
-      signal: abortSignal,
-    });
-    const fetchTime = Date.now() - fetchStartTime;
-
-    // Log response status for debugging
-    logger.debug("Upstream response", {
-      url,
-      statusCode: response.statusCode,
-      contentLength: response.body?.length || 0,
-      contentType: response.headers["content-type"],
-    });
-
-    // Log 403 errors specifically
-    if (response.statusCode === 403) {
-      logger.warn("Upstream returned 403 Forbidden", {
-        url,
-        userAgent: fetchHeaders["user-agent"],
-        referer: fetchHeaders["referer"],
-        acceptEncoding: fetchHeaders["accept-encoding"],
+  // Retry logic with exponential backoff for 403/429 errors
+  const MAX_RETRIES = 2;
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    try {
+      const response = await fetchWithRetry(url, {
+        headers: fetchHeaders,
+        responseType: "buffer",
+        signal: abortSignal,
       });
-    }
+      const fetchTime = Date.now() - fetchStartTime;
 
-    // Reset failure count on success
-    if (upstreamFailureCount > 0) {
-      upstreamFailureCount = 0;
-      logger.debug("Upstream circuit breaker failure count reset", { url });
-    }
+      // If 403/429 and we have retries left, wait and retry
+      if ((response.statusCode === 403 || response.statusCode === 429) && attempt <= MAX_RETRIES) {
+        const baseDelay = 2000 * Math.pow(2, attempt - 1); // 2s, 4s
+        const jitter = Math.random() * 1000;
+        const delay = Math.min(6000, baseDelay + jitter);
+        
+        logger.debug("Upstream returned 403/429, retrying", {
+          url,
+          statusCode: response.statusCode,
+          attempt,
+          delay: Math.round(delay),
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
 
-    return {
-      response: {
-        ok: response.statusCode >= 200 && response.statusCode < 300,
-        status: response.statusCode,
-        headers: {
-          get: (name) => response.headers[name.toLowerCase()] || null,
-          entries: () => Object.entries(response.headers),
+      // Log response status for debugging
+      logger.debug("Upstream response", {
+        url,
+        statusCode: response.statusCode,
+        contentLength: response.body?.length || 0,
+        contentType: response.headers["content-type"],
+      });
+
+      // Log 403 errors specifically
+      if (response.statusCode === 403) {
+        logger.warn("Upstream returned 403 Forbidden after retries", {
+          url,
+          userAgent: fetchHeaders["user-agent"],
+          referer: fetchHeaders["referer"],
+          acceptEncoding: fetchHeaders["accept-encoding"],
+        });
+      }
+
+      // Reset failure count on success
+      if (upstreamFailureCount > 0 && response.statusCode >= 200 && response.statusCode < 300) {
+        upstreamFailureCount = 0;
+        logger.debug("Upstream circuit breaker failure count reset", { url });
+      }
+
+      return {
+        response: {
+          ok: response.statusCode >= 200 && response.statusCode < 300,
+          status: response.statusCode,
+          headers: {
+            get: (name) => response.headers[name.toLowerCase()] || null,
+            entries: () => Object.entries(response.headers),
+          },
+          arrayBuffer: async () => Buffer.from(response.body),
         },
-        arrayBuffer: async () => Buffer.from(response.body),
-      },
-      fetchTime,
-      success: response.statusCode >= 200 && response.statusCode < 300,
-    };
-  } catch (error) {
-    // Increment failure count
-    upstreamFailureCount++;
-    logger.error("Upstream fetch error", { url, error: error.message, failureCount: upstreamFailureCount });
-
-    // Log 403 errors specifically for debugging
-    if (error.response?.statusCode === 403) {
-      logger.warn("Upstream returned 403 Forbidden", {
-        url,
-        referer: fetchHeaders["referer"],
-        acceptEncoding: fetchHeaders["accept-encoding"],
-        failureCount: upstreamFailureCount,
-      });
+        fetchTime,
+        success: response.statusCode >= 200 && response.statusCode < 300,
+      };
+    } catch (error) {
+      lastError = error;
+      
+      // Retry on network errors with exponential backoff
+      if (attempt <= MAX_RETRIES && (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.name === 'AbortError')) {
+        const baseDelay = 2000 * Math.pow(2, attempt - 1);
+        const jitter = Math.random() * 1000;
+        const delay = Math.min(6000, baseDelay + jitter);
+        
+        logger.debug("Upstream network error, retrying", {
+          url,
+          error: error.code || error.name,
+          attempt,
+          delay: Math.round(delay),
+        });
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      // No more retries or non-retryable error
+      break;
     }
-
-    // Open circuit breaker if threshold reached
-    if (upstreamFailureCount >= CONFIG.UPSTREAM_FAILURE_THRESHOLD) {
-      upstreamCircuitBreakerOpen = true;
-      upstreamCircuitBreakerResetTime = Date.now() + CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT;
-      logger.warn("Upstream circuit breaker opened", {
-        url,
-        failureCount: upstreamFailureCount,
-        resetIn: CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT
-      });
-    }
-
-    if (error.name === "AbortError") {
-      logger.debug("Upstream fetch aborted", { url });
-    }
-    return {
-      response: { status: error.response?.statusCode || 500, headers: { get: () => null, entries: () => [] } },
-      fetchTime: Date.now() - fetchStartTime,
-      success: false,
-    };
   }
+  
+  // All retries failed or non-retryable error
+  const fetchTime = Date.now() - fetchStartTime;
+  
+  // Increment failure count
+  upstreamFailureCount++;
+  const errorMessage = lastError?.message || lastError?.code || 'Unknown error';
+  const errorStatusCode = lastError?.response?.statusCode || 500;
+  
+  logger.error("Upstream fetch error after retries", { 
+    url, 
+    error: errorMessage, 
+    statusCode: errorStatusCode,
+    failureCount: upstreamFailureCount,
+    attempts: MAX_RETRIES + 1 
+  });
+
+  // Log 403 errors specifically for debugging
+  if (lastError?.response?.statusCode === 403 || errorStatusCode === 403) {
+    logger.warn("Upstream returned 403 Forbidden after all retries", {
+      url,
+      referer: fetchHeaders["referer"],
+      acceptEncoding: fetchHeaders["accept-encoding"],
+      failureCount: upstreamFailureCount,
+    });
+  }
+
+  // Open circuit breaker if threshold reached
+  if (upstreamFailureCount >= CONFIG.UPSTREAM_FAILURE_THRESHOLD) {
+    upstreamCircuitBreakerOpen = true;
+    upstreamCircuitBreakerResetTime = Date.now() + CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT;
+    logger.warn("Upstream circuit breaker opened", {
+      url,
+      failureCount: upstreamFailureCount,
+      resetIn: CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT
+    });
+  }
+
+  if (lastError?.name === "AbortError") {
+    logger.debug("Upstream fetch aborted", { url });
+  }
+  
+  return {
+    response: { 
+      status: lastError?.response?.statusCode || errorStatusCode, 
+      headers: { get: () => null, entries: () => [] } 
+    },
+    fetchTime,
+    success: false,
+  };
 };
 
 const processUpstreamResponse = async (fetchResult, url) => {
