@@ -149,6 +149,18 @@ export function proxyRoutes(options: ProxyOptions) {
 
           logger.logBypass({ url: imageUrl, size: contentLength, reason });
 
+          // If upstream returned non-image (e.g., 403 HTML error), return error to client
+          if (!contentType.startsWith("image/")) {
+            clearTimeout(timeout);
+            set.status = 502;
+            set.headers["content-type"] = "application/json";
+            return {
+              error: "Upstream returned non-image response",
+              reason: "upstream_error",
+              contentType,
+            };
+          }
+
           clearTimeout(timeout);
           return createImageResponse(buffer, contentType, {
             ...sanitizeResponseHeaders(upstreamHeaders),

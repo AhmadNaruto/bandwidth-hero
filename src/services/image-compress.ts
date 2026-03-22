@@ -7,22 +7,22 @@ const CONFIG = {
   MAX_WIDTH: 800,
   MAX_JPEG_HEIGHT: 32767,
   MAX_AVIF_HEIGHT: 16383,
-  GRAYSCALE_QUALITY_RANGE: { min: 15, max: 35 },
+  GRAYSCALE_QUALITY_RANGE: { min: 25, max: 45 },  // Increased for better quality
   DEFAULT_DIMENSIONS: { width: 400, height: 400 },
   DEFAULT_FORMAT: "avif",
-  COMPRESSION_TIMEOUT: 120000,
+  COMPRESSION_TIMEOUT: 60000,  // Reduced to 60s
 
   AVIF_OPTIONS: {
     quality: 75,
     alphaQuality: 90,
-    speed: 4,
-    chromaSubsampling: 2,
+    speed: 7,  // Faster (1=slowest, 10=fastest)
+    chromaSubsampling: 2,  // YUV420
   },
 
   JPEG_QUALITY: {
     DEFAULT: 75,
-    GRAYSCALE_MIN: 15,
-    GRAYSCALE_MAX: 35,
+    GRAYSCALE_MIN: 25,
+    GRAYSCALE_MAX: 45,
   },
 } as const;
 
