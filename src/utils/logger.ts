@@ -26,19 +26,21 @@ export function getLogBuffer(): LogEntry[] {
   return logBuffer;
 }
 
+export function addLogToBuffer(log: LogEntry) {
+  logBuffer.push(log);
+  if (logBuffer.length > MAX_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+  if (onLogCallback) {
+    onLogCallback(log);
+  }
+}
+
 const writeLog = (logEntry: LogEntry) => {
   Bun.stdout.write(JSON.stringify(logEntry) + "\n");
   
   // Add to buffer for monitor
-  logBuffer.push(logEntry);
-  if (logBuffer.length > MAX_BUFFER_SIZE) {
-    logBuffer.shift();
-  }
-  
-  // Notify monitor
-  if (onLogCallback) {
-    onLogCallback(logEntry);
-  }
+  addLogToBuffer(logEntry);
 };
 
 export class Logger {
@@ -112,12 +114,33 @@ export class Logger {
     const { url, originalSize, compressedSize, bytesSaved, quality, format, error } = details;
 
     if (error) {
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        level: "WARN" as const,
+        message: "Failed Compress",
+        url: this.truncateUrl(url),
+        originalSize: this.formatBytes(originalSize || 0),
+        error: error.message || String(error),
+      };
+      addLogToBuffer(logEntry);
       this.warn("Failed Compress", {
         url: this.truncateUrl(url),
         originalSize: this.formatBytes(originalSize || 0),
         error: error.message || String(error),
       });
     } else {
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        level: "INFO" as const,
+        message: "Image Zip",
+        savings: this.formatBytes(bytesSaved || 0),
+        percent: originalSize && compressedSize
+          ? `${((originalSize - compressedSize) / originalSize * 100).toFixed(1)}%`
+          : "Unknown",
+        quality: quality || 0,
+        format: format || "Unknown",
+      };
+      addLogToBuffer(logEntry);
       this.info("Image Zip", {
         savings: this.formatBytes(bytesSaved || 0),
         percent: originalSize && compressedSize
@@ -141,6 +164,24 @@ export class Logger {
   }) {
     const { url, userAgent, referer, ip, jpeg, bw, quality, contentType } = details;
 
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: "DEBUG" as const,
+      message: "Request received",
+      url: this.truncateUrl(url),
+      client: {
+        ip: ip || "Unknown",
+        userAgent: this.truncateString(userAgent, 100),
+        referer: referer || "Direct",
+      },
+      compressionOptions: {
+        forceJpeg: !!jpeg,
+        grayscale: !!bw,
+        quality: quality || 0,
+      },
+      contentType: contentType || "Unknown",
+    };
+    addLogToBuffer(logEntry);
     this.debug("Request received", {
       url: this.truncateUrl(url),
       client: {
@@ -151,7 +192,7 @@ export class Logger {
       compressionOptions: {
         forceJpeg: !!jpeg,
         grayscale: !!bw,
-        quality: quality || 40,
+        quality: quality || 0,
       },
       contentType: contentType || "Unknown",
     });
@@ -159,6 +200,15 @@ export class Logger {
 
   logBypass(details: { url?: string; size?: number; reason?: string }) {
     const { url, size, reason } = details;
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level: "INFO" as const,
+      message: "Bypassing",
+      url: this.truncateUrl(url),
+      size: this.formatBytes(size || 0),
+      reason: reason || "Unknown",
+    };
+    addLogToBuffer(logEntry);
     this.info("Bypassing", {
       url: this.truncateUrl(url),
       size: this.formatBytes(size || 0),
@@ -169,7 +219,17 @@ export class Logger {
   logUpstreamFetch(details: { url?: string; statusCode?: string | number; success: boolean }) {
     const { url, statusCode, success } = details;
     const level: LogLevel = success ? "INFO" : "WARN";
-    this.log(level, success ? "Get Image Ok" : "Get Image Err", {
+    const message = success ? "Get Image Ok" : "Get Image Err";
+    
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      url: this.truncateUrl(url, 20),
+      statusCode: statusCode || "Unknown",
+    };
+    addLogToBuffer(logEntry);
+    this.log(level, message, {
       url: this.truncateUrl(url, 20),
       statusCode: statusCode || "Unknown",
     });
