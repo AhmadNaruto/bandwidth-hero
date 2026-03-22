@@ -30,16 +30,16 @@ const CONFIG = {
   PORT: parseInt(process.env.PORT || "8080", 10),
   NODE_ENV: process.env.NODE_ENV || "development",
 
-  // Queue configuration
+  // Queue configuration - SMALL worker pool for rate limiting to upstream
   QUEUE_ENABLED: true,
-  WORKER_COUNT: 50,  // Workers for parallel upstream requests
-  WORKER_MIN_DELAY: 100,  // Reduced for faster processing
-  WORKER_MAX_DELAY: 300,
-  QUEUE_MAX_SIZE: 200,  // Larger queue for traffic spikes
+  WORKER_COUNT: 5,  // Only 5 concurrent upstream fetches (rate limit)
+  WORKER_MIN_DELAY: 500,  // Delay between requests to avoid 403
+  WORKER_MAX_DELAY: 1000,
+  QUEUE_MAX_SIZE: 200,  // Large queue to buffer incoming requests
   QUEUE_TIMEOUT: 120000,
 
-  // Rate limiting - should match or be less than worker count
-  MAX_CONCURRENT_REQUESTS: 50,
+  // Rate limiting - server can accept many requests, they queue up
+  MAX_CONCURRENT_REQUESTS: 100,  // Accept 100 concurrent connections
 } as const;
 
 // Initialize queue
