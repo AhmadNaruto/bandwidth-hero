@@ -4,9 +4,25 @@ Welcome to **Bandwidth Hero Proxy** 🚀 - a high-performance image compression 
 
 Forked from [adi-g15/bandwidth-hero-proxy](https://github.com/adi-g15/bandwidth-hero-proxy). This fork is actively maintained with modern dependencies and improved code quality.
 
-This is a data compression service used by the [Bandwidth Hero](https://github.com/ayastreb/bandwidth-hero) browser extension. It compresses images (optionally grayscale) to low-res WebP, AVIF, or JPEG format using [Sharp](https://github.com/lovell/sharp) without saving images to disk.
+This is a data compression service used by the [Bandwidth Hero](https://github.com/ayastreb/bandwidth-hero) browser extension. It compresses images (optionally grayscale) to low-res WebP, AVIF, or JPEG format using [@napi-rs/image](https://image.napi.rs/) without saving images to disk.
 
 > **Note:** Downloads images on user's behalf by forwarding browser headers, cookies, and IP address to the origin host.
+
+## ⚠️ IMPORTANT: systemd Required
+
+**This server MUST be run via systemd in production.** Manual execution is blocked when `NODE_ENV=production`.
+
+```bash
+# ✅ Correct: Use systemd
+sudo systemctl start bandwidth-hero
+sudo systemctl restart bandwidth-hero
+sudo systemctl status bandwidth-hero
+
+# ❌ Wrong: Do NOT run manually in production
+NODE_ENV=production bun run src/index.ts  # Will fail with error
+```
+
+See [SYSTEMD_REQUIRED.md](SYSTEMD_REQUIRED.md) for detailed documentation.
 
 ## Features
 
