@@ -3,13 +3,11 @@
 // NOTE: This server should only be run via systemd. Do not run manually.
 
 import express from "express";
-import { createServer, Agent } from "http";
-import { Agent as HttpsAgent } from "https";
+import { createServer } from "http";
 import crypto from "crypto";
 import wretch from "wretch";
 import QueryStringAddon from "wretch/addons/queryString";
 import AbortAddon from "wretch/addons/abort";
-import pick from "./util/pick.js";
 import shouldCompress from "./util/shouldCompress.js";
 import compressImage from "./util/compress.js";
 import logger from "./util/logger.js";
@@ -34,11 +32,6 @@ const CONFIG = {
   REQUEST_TIMEOUT: 60000,
   MAX_REQUEST_SIZE: "10mb",
 
-  // Connection pooling limits
-  HTTP_MAX_SOCKETS: 50,
-  HTTP_MAX_FREE_SOCKETS: 10,
-  HTTP_TIMEOUT: 30000,
-
   // Concurrency limits
   MAX_CONCURRENT_REQUESTS: 100,
 
@@ -50,24 +43,6 @@ const CONFIG = {
   QUEUE_MAX_SIZE: 100,
   QUEUE_TIMEOUT: 120000,
 };
-
-// HTTP/HTTPS Agents with connection pooling limits
-const httpAgent = new Agent({
-  keepAlive: true,
-  maxSockets: CONFIG.HTTP_MAX_SOCKETS,
-  maxFreeSockets: CONFIG.HTTP_MAX_FREE_SOCKETS,
-  timeout: CONFIG.HTTP_TIMEOUT,
-  scheduleTimeout: true,
-});
-
-const httpsAgent = new HttpsAgent({
-  keepAlive: true,
-  maxSockets: CONFIG.HTTP_MAX_SOCKETS,
-  maxFreeSockets: CONFIG.HTTP_MAX_FREE_SOCKETS,
-  timeout: CONFIG.HTTP_TIMEOUT,
-  scheduleTimeout: true,
-  rejectUnauthorized: true,
-});
 
 // Security middleware
 app.disable("x-powered-by");
@@ -114,20 +89,6 @@ setInterval(() => {
   queueMetrics.lastWaitTime = 0;
   // Keep maxWaitTime for reference, reset after 24 hours
 }, 3600000); // Every hour
-
-// Periodic socket pool monitoring
-setInterval(() => {
-  logger.trace("Socket pool status", {
-    http: {
-      sockets: httpAgent.sockets?.length || 0,
-      freeSockets: httpAgent.freeSockets?.length || 0,
-    },
-    https: {
-      sockets: httpsAgent.sockets?.length || 0,
-      freeSockets: httpsAgent.freeSockets?.length || 0,
-    },
-  });
-}, 60000); // Every minute
 
 // Request ID counter for tracing
 let requestIdCounter = 0;
@@ -880,10 +841,6 @@ const gracefulShutdown = (signal) => {
       process.exit(1);
     }, 10000);
   });
-
-  // Close HTTP agents to release sockets
-  httpAgent.destroy();
-  httpsAgent.destroy();
 };
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
