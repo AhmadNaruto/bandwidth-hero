@@ -5,14 +5,7 @@ const MAX_LOG_LINES = 100;
 
 export function monitorRoute() {
   return new Elysia({ prefix: "/monitor" })
-    // Main Dashboard - Beautiful UI (akses via /monitor/stream)
-    .get("/stream", () => {
-      return new Response(getMonitorHtml(), {
-        headers: { "content-type": "text/html" },
-      });
-    })
-
-    // Also serve at root /monitor for convenience
+    // Dashboard - Beautiful UI
     .get("/", () => {
       return new Response(getMonitorHtml(), {
         headers: { "content-type": "text/html" },
