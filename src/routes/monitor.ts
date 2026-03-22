@@ -607,32 +607,6 @@ function getMonitorHtml() {
       <span class="status-indicator"></span>
       🚀 Bandwidth Hero - Live Monitor
     </h1>
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-value" id="totalLogs">0</div>
-        <div class="stat-label">Total Logs</div>
-        <div class="stat-bar" id="totalBar"></div>
-      </div>
-      <div class="stat-card error">
-        <div class="stat-icon">🔴</div>
-        <div class="stat-value" id="errorCount">0</div>
-        <div class="stat-label">Errors</div>
-        <div class="stat-bar" id="errorBar"></div>
-      </div>
-      <div class="stat-card warn">
-        <div class="stat-icon">🟡</div>
-        <div class="stat-value" id="warnCount">0</div>
-        <div class="stat-label">Warnings</div>
-        <div class="stat-bar" id="warnBar"></div>
-      </div>
-      <div class="stat-card info">
-        <div class="stat-icon">⚡</div>
-        <div class="stat-value" id="logsPerSec">0</div>
-        <div class="stat-label">Logs/sec</div>
-        <div class="stat-bar" id="speedBar"></div>
-      </div>
-    </div>
     <div class="filters">
       <button class="filter-btn active" data-level="ALL">ALL</button>
       <button class="filter-btn" data-level="ERROR">ERROR</button>
@@ -699,56 +673,7 @@ function getMonitorHtml() {
       if (metadata.length === 0) return '';
       return '<div class="log-metadata">' + metadata.join(' | ') + '</div>';
     }
-    function updateStats() {
-      const logs = logContainer.getElementsByClassName('log-entry');
-      const total = logs.length;
-      const errors = Array.from(logs).filter(l => l.querySelector('.log-level.ERROR')).length;
-      const warns = Array.from(logs).filter(l => l.querySelector('.log-level.WARN')).length;
-
-      // Animate numbers with counter effect
-      animateCounter('totalLogs', total);
-      animateCounter('errorCount', errors);
-      animateCounter('warnCount', warns);
-      
-      // Add glow effect on change
-      flashOnChange('totalLogs', total);
-    }
-    
-    function animateCounter(elementId, target) {
-      const element = document.getElementById(elementId);
-      if (!element) return;
-      
-      const current = parseInt(element.textContent) || 0;
-      const diff = target - current;
-      
-      if (diff === 0) return;
-      
-      const steps = 10;
-      const increment = diff / steps;
-      let step = 0;
-      
-      const timer = setInterval(() => {
-        step++;
-        const newValue = Math.round(current + (increment * step));
-        element.textContent = newValue.toString();
-        
-        if (step >= steps) {
-          clearInterval(timer);
-          element.textContent = target.toString();
-        }
-      }, 30);
-    }
-    
-    function flashOnChange(elementId, newValue) {
-      const element = document.getElementById(elementId);
-      if (!element) return;
-      
-      element.parentElement.style.animation = 'glow 0.5s ease';
-      setTimeout(() => {
-        element.parentElement.style.animation = '';
-      }, 500);
-    }
-    function clearLogs() { logContainer.innerHTML = ''; updateStats(); }
+    function clearLogs() { logContainer.innerHTML = ''; }
     document.querySelectorAll('.filter-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -757,21 +682,19 @@ function getMonitorHtml() {
         logContainer.innerHTML = '';
         fetch(\`/monitor/logs?level=\${currentFilter}&limit=100\`)
           .then(r => r.json())
-          .then(data => { 
-            data.logs.forEach(log => addLogEntry(log)); 
-            updateStats();
+          .then(data => {
+            const reversedLogs = data.logs.reverse();
+            reversedLogs.forEach(log => addLogEntry(log));
           });
       });
     });
-    
-    // Initial load with stats update - show newest first
+
+    // Initial load - show newest first
     fetch('/monitor/logs?limit=100')
       .then(r => r.json())
       .then(data => {
-        // Reverse to show newest logs at the top
         const reversedLogs = data.logs.reverse();
         reversedLogs.forEach(log => addLogEntry(log));
-        updateStats();
       });
   </script>
 </body>
