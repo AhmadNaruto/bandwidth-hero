@@ -161,11 +161,29 @@ export function proxyRoutes(options: ProxyOptions) {
             };
           }
 
+          // Bypass compression but still send the image to client
           clearTimeout(timeout);
-          return createImageResponse(buffer, contentType, {
-            ...sanitizeResponseHeaders(upstreamHeaders),
-            "x-bypass-reason": reason,
-            "x-url-hash": urlHash,
+          logger.debug("Sending bypassed image", {
+            url: imageUrl,
+            size: contentLength,
+            contentType,
+            reason,
+          });
+
+          return new Response(buffer, {
+            status: 200,
+            headers: {
+              "content-type": contentType,
+              "content-length": buffer.length.toString(),
+              "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+              pragma: "no-cache",
+              expires: "0",
+              ...sanitizeResponseHeaders(upstreamHeaders),
+              "x-compression-status": `bypassed-${reason}`,
+              "x-bypass-reason": reason,
+              "x-url-hash": urlHash,
+              "x-original-size": contentLength.toString(),
+            },
           });
         }
 
