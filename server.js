@@ -5,7 +5,9 @@ import { createServer, Agent } from "http";
 import { Agent as HttpsAgent } from "https";
 import compression from "compression";
 import crypto from "crypto";
-import got from "got";
+import wretch from "wretch";
+import QueryStringAddon from "wretch/addons/queryString";
+import AbortAddon from "wretch/addons/abort";
 import rateLimit from "express-rate-limit";
 import pick from "./util/pick.js";
 import shouldCompress from "./util/shouldCompress.js";
@@ -439,27 +441,14 @@ const cleanImageUrl = (url) => {
 
 const generateUrlHash = (url) => crypto.createHash("sha256").update(url).digest("hex").slice(0, 16);
 
-// Configure got with proper agents and limits
-const fetchWithRetry = got.extend({
-  retry: {
-    limit: 0, // No automatic retry - we handle it manually
-  },
-  timeout: {
-    request: CONFIG.REQUEST_TIMEOUT - 5000, // Leave 5s buffer for processing
-    connect: 5000,
-    lookup: 2000,
-  },
-  decompress: true,
-  throwHttpErrors: false,
-  http2: false, // Disable HTTP/2 to avoid :status header issues and connection leaks
-  https: {
-    rejectUnauthorized: true,
-  },
-  agent: {
-    http: httpAgent,
-    https: httpsAgent,
-  },
-});
+// Configure wretch with addons
+const api = wretch()
+  .addon(QueryStringAddon)
+  .addon(AbortAddon())
+  .options({
+    cache: 'no-store',
+    redirect: 'follow',
+  });
 
 const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
   const fetchStartTime = Date.now();
@@ -569,29 +558,38 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
   // Retry logic with exponential backoff for 403/429 errors
   const MAX_RETRIES = 2;
   let lastError = null;
-  
+
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     try {
-      const response = await fetchWithRetry(url, {
-        headers: fetchHeaders,
-        responseType: "buffer",
-        signal: abortSignal,
-      });
+      // Use wretch to fetch image
+      const response = await api
+        .url(url)
+        .headers(fetchHeaders)
+        .signal(abortSignal)
+        .get()
+        .res();
+
       const fetchTime = Date.now() - fetchStartTime;
+      const statusCode = response.status;
+      const contentType = response.headers.get('content-type') || '';
+      
+      // Get array buffer from response
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
 
       // If 403/429 and we have retries left, wait and retry
-      if ((response.statusCode === 403 || response.statusCode === 429) && attempt <= MAX_RETRIES) {
+      if ((statusCode === 403 || statusCode === 429) && attempt <= MAX_RETRIES) {
         const baseDelay = 2000 * Math.pow(2, attempt - 1); // 2s, 4s
         const jitter = Math.random() * 1000;
         const delay = Math.min(6000, baseDelay + jitter);
-        
+
         logger.debug("Upstream returned 403/429, retrying", {
           url,
-          statusCode: response.statusCode,
+          statusCode,
           attempt,
           delay: Math.round(delay),
         });
-        
+
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
@@ -599,13 +597,13 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
       // Log response status for debugging
       logger.debug("Upstream response", {
         url,
-        statusCode: response.statusCode,
-        contentLength: response.body?.length || 0,
-        contentType: response.headers["content-type"],
+        statusCode,
+        contentLength: buffer?.length || 0,
+        contentType,
       });
 
       // Log 403 errors specifically
-      if (response.statusCode === 403) {
+      if (statusCode === 403) {
         logger.warn("Upstream returned 403 Forbidden after retries", {
           url,
           userAgent: fetchHeaders["user-agent"],
@@ -615,67 +613,68 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
       }
 
       // Reset failure count on success
-      if (upstreamFailureCount > 0 && response.statusCode >= 200 && response.statusCode < 300) {
+      if (upstreamFailureCount > 0 && statusCode >= 200 && statusCode < 300) {
         upstreamFailureCount = 0;
         logger.debug("Upstream circuit breaker failure count reset", { url });
       }
 
       return {
         response: {
-          ok: response.statusCode >= 200 && response.statusCode < 300,
-          status: response.statusCode,
+          ok: statusCode >= 200 && statusCode < 300,
+          status: statusCode,
           headers: {
-            get: (name) => response.headers[name.toLowerCase()] || null,
-            entries: () => Object.entries(response.headers),
+            get: (name) => response.headers.get(name) || null,
+            entries: () => Array.from(response.headers.entries()),
           },
-          arrayBuffer: async () => Buffer.from(response.body),
+          arrayBuffer: async () => buffer,
         },
         fetchTime,
-        success: response.statusCode >= 200 && response.statusCode < 300,
+        success: statusCode >= 200 && statusCode < 300,
+        buffer,
       };
     } catch (error) {
       lastError = error;
-      
+
       // Retry on network errors with exponential backoff
       if (attempt <= MAX_RETRIES && (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.name === 'AbortError')) {
         const baseDelay = 2000 * Math.pow(2, attempt - 1);
         const jitter = Math.random() * 1000;
         const delay = Math.min(6000, baseDelay + jitter);
-        
+
         logger.debug("Upstream network error, retrying", {
           url,
           error: error.code || error.name,
           attempt,
           delay: Math.round(delay),
         });
-        
+
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
-      
+
       // No more retries or non-retryable error
       break;
     }
   }
-  
+
   // All retries failed or non-retryable error
   const fetchTime = Date.now() - fetchStartTime;
-  
+
   // Increment failure count
   upstreamFailureCount++;
   const errorMessage = lastError?.message || lastError?.code || 'Unknown error';
-  const errorStatusCode = lastError?.response?.statusCode || 500;
-  
-  logger.error("Upstream fetch error after retries", { 
-    url, 
-    error: errorMessage, 
+  const errorStatusCode = lastError?.status || 500;
+
+  logger.error("Upstream fetch error after retries", {
+    url,
+    error: errorMessage,
     statusCode: errorStatusCode,
     failureCount: upstreamFailureCount,
-    attempts: MAX_RETRIES + 1 
+    attempts: MAX_RETRIES + 1,
   });
 
   // Log 403 errors specifically for debugging
-  if (lastError?.response?.statusCode === 403 || errorStatusCode === 403) {
+  if (lastError?.status === 403 || errorStatusCode === 403) {
     logger.warn("Upstream returned 403 Forbidden after all retries", {
       url,
       referer: fetchHeaders["referer"],
@@ -691,26 +690,27 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
     logger.warn("Upstream circuit breaker opened", {
       url,
       failureCount: upstreamFailureCount,
-      resetIn: CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT
+      resetIn: CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT,
     });
   }
 
   if (lastError?.name === "AbortError") {
     logger.debug("Upstream fetch aborted", { url });
   }
-  
+
   return {
-    response: { 
-      status: lastError?.response?.statusCode || errorStatusCode, 
-      headers: { get: () => null, entries: () => [] } 
+    response: {
+      status: errorStatusCode,
+      headers: { get: () => null, entries: () => [] },
     },
     fetchTime,
     success: false,
+    buffer: null,
   };
 };
 
 const processUpstreamResponse = async (fetchResult, url) => {
-  const { response, success, fetchTime } = fetchResult;
+  const { response, success, fetchTime, buffer: fetchedBuffer } = fetchResult;
 
   if (!success) {
     logger.logUpstreamFetch({ url, statusCode: response.status || "Unknown", fetchTime, success: false });
@@ -723,7 +723,7 @@ const processUpstreamResponse = async (fetchResult, url) => {
   delete upstreamHeaders["x-encoded-content-encoding"];
 
   const contentType = response.headers.get("content-type") || "";
-  const buffer = await response.arrayBuffer();
+  const buffer = fetchedBuffer || await response.arrayBuffer();
 
   logger.logUpstreamFetch({ url, statusCode: response.status || "Unknown", fetchTime, success: true });
 
