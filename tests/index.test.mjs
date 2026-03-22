@@ -1,6 +1,5 @@
 import { test, describe, beforeEach, afterEach } from "bun:test";
 import { expect } from "bun:test";
-import pick from "../util/pick.js";
 import shouldCompress from "../util/shouldCompress.js";
 import logger from "../util/logger.js";
 
@@ -24,44 +23,6 @@ afterEach(() => {
 });
 
 // --- UNIT TESTS ---
-
-describe("util/pick.js", () => {
-    test("should filter headers correctly", () => {
-        const headers = {
-            "user-agent": "Mozilla/5.0",
-            "cookie": "session=123",
-            "x-ignored": "should-not-exist"
-        };
-        const whitelist = ["user-agent", "cookie"];
-        const result = pick(headers, whitelist);
-
-        expect(result["user-agent"]).toBe("Mozilla/5.0");
-        expect(result["cookie"]).toBe("session=123");
-        expect(result["x-ignored"]).toBeUndefined();
-    });
-
-    test("should handle empty source object", () => {
-        const result = pick({}, ["user-agent"]);
-        expect(result).toEqual({});
-    });
-
-    test("should handle null source", () => {
-        const result = pick(null, ["user-agent"]);
-        expect(result).toEqual({});
-    });
-
-    test("should handle case-insensitive matching", () => {
-        const headers = {
-            "User-Agent": "Mozilla/5.0",
-            "COOKIE": "session=123"
-        };
-        const whitelist = ["user-agent", "cookie"];
-        const result = pick(headers, whitelist);
-
-        expect(result["user-agent"]).toBe("Mozilla/5.0");
-        expect(result["cookie"]).toBe("session=123");
-    });
-});
 
 describe("util/shouldCompress.js", () => {
     test("should return false for non-image content type", () => {
