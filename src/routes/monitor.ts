@@ -141,11 +141,12 @@ function getMonitorHtml() {
       top: 0; left: 0; right: 0;
       height: 3px;
       background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+      animation: shimmer 2s infinite;
     }
     
     .stat-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(0, 217, 255, 0.2);
+      transform: translateY(-4px) scale(1.02);
+      box-shadow: 0 12px 32px rgba(0, 217, 255, 0.3);
     }
     
     .stat-card.error::before {
@@ -156,6 +157,21 @@ function getMonitorHtml() {
       background: linear-gradient(90deg, var(--accent-orange), var(--accent-red));
     }
     
+    .stat-card.info::before {
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+    }
+    
+    .stat-icon {
+      font-size: 32px;
+      margin-bottom: 8px;
+      animation: bounce 2s infinite;
+    }
+    
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+    
     .stat-value {
       font-size: 36px;
       font-weight: 700;
@@ -163,10 +179,29 @@ function getMonitorHtml() {
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
+      transition: all 0.3s ease;
+    }
+    
+    .stat-card:hover .stat-value {
+      transform: scale(1.1);
     }
     
     .stat-card.error .stat-value {
       background: linear-gradient(135deg, var(--accent-red), var(--accent-orange));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .stat-card.warn .stat-value {
+      background: linear-gradient(135deg, var(--accent-orange), var(--accent-red));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .stat-card.info .stat-value {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -178,6 +213,21 @@ function getMonitorHtml() {
       margin-top: 8px;
       text-transform: uppercase;
       letter-spacing: 1px;
+    }
+    
+    .stat-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, transparent, var(--accent-cyan), transparent);
+      transform: scaleX(0);
+      transition: transform 0.5s ease;
+    }
+    
+    .stat-card:hover .stat-bar {
+      transform: scaleX(1);
     }
     
     .filters {
@@ -399,6 +449,27 @@ function getMonitorHtml() {
       50% { opacity: 0.5; transform: scale(1.2); }
     }
     
+    @keyframes shimmer {
+      0% { opacity: 0.5; }
+      50% { opacity: 1; }
+      100% { opacity: 0.5; }
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 5px var(--accent-cyan); }
+      50% { box-shadow: 0 0 20px var(--accent-cyan), 0 0 30px var(--accent-cyan); }
+    }
+    
     .empty-state {
       text-align: center;
       padding: 60px 20px;
@@ -507,16 +578,28 @@ function getMonitorHtml() {
     </h1>
     <div class="stats">
       <div class="stat-card">
+        <div class="stat-icon">📊</div>
         <div class="stat-value" id="totalLogs">0</div>
-        <div class="stat-label">📊 Total Logs</div>
+        <div class="stat-label">Total Logs</div>
+        <div class="stat-bar" id="totalBar"></div>
       </div>
       <div class="stat-card error">
+        <div class="stat-icon">🔴</div>
         <div class="stat-value" id="errorCount">0</div>
-        <div class="stat-label">🔴 Errors</div>
+        <div class="stat-label">Errors</div>
+        <div class="stat-bar" id="errorBar"></div>
       </div>
       <div class="stat-card warn">
+        <div class="stat-icon">🟡</div>
         <div class="stat-value" id="warnCount">0</div>
-        <div class="stat-label">🟡 Warnings</div>
+        <div class="stat-label">Warnings</div>
+        <div class="stat-bar" id="warnBar"></div>
+      </div>
+      <div class="stat-card info">
+        <div class="stat-icon">⚡</div>
+        <div class="stat-value" id="logsPerSec">0</div>
+        <div class="stat-label">Logs/sec</div>
+        <div class="stat-bar" id="speedBar"></div>
       </div>
     </div>
     <div class="filters">
@@ -587,14 +670,49 @@ function getMonitorHtml() {
       const total = logs.length;
       const errors = Array.from(logs).filter(l => l.querySelector('.log-level.ERROR')).length;
       const warns = Array.from(logs).filter(l => l.querySelector('.log-level.WARN')).length;
+
+      // Animate numbers with counter effect
+      animateCounter('totalLogs', total);
+      animateCounter('errorCount', errors);
+      animateCounter('warnCount', warns);
       
-      const totalEl = document.getElementById('totalLogs');
-      const errorEl = document.getElementById('errorCount');
-      const warnEl = document.getElementById('warnCount');
+      // Add glow effect on change
+      flashOnChange('totalLogs', total);
+    }
+    
+    function animateCounter(elementId, target) {
+      const element = document.getElementById(elementId);
+      if (!element) return;
       
-      if (totalEl) totalEl.textContent = total.toString();
-      if (errorEl) errorEl.textContent = errors.toString();
-      if (warnEl) warnEl.textContent = warns.toString();
+      const current = parseInt(element.textContent) || 0;
+      const diff = target - current;
+      
+      if (diff === 0) return;
+      
+      const steps = 10;
+      const increment = diff / steps;
+      let step = 0;
+      
+      const timer = setInterval(() => {
+        step++;
+        const newValue = Math.round(current + (increment * step));
+        element.textContent = newValue.toString();
+        
+        if (step >= steps) {
+          clearInterval(timer);
+          element.textContent = target.toString();
+        }
+      }, 30);
+    }
+    
+    function flashOnChange(elementId, newValue) {
+      const element = document.getElementById(elementId);
+      if (!element) return;
+      
+      element.parentElement.style.animation = 'glow 0.5s ease';
+      setTimeout(() => {
+        element.parentElement.style.animation = '';
+      }, 500);
     }
     function clearLogs() { logContainer.innerHTML = ''; updateStats(); }
     document.querySelectorAll('.filter-btn').forEach(btn => {
