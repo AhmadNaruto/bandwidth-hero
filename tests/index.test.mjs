@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach } from "bun:test";
 import { expect } from "bun:test";
-import shouldCompress from "../util/shouldCompress.js";
-import logger from "../util/logger.js";
+import shouldCompress from "../src/utils/should-compress.js";
+import logger from "../src/utils/logger.js";
 
 /**
  * MOCKING SECTION
