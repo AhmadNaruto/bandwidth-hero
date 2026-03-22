@@ -8,11 +8,37 @@ interface LogEntry {
   timestamp: string;
   level: string;
   message: string;
-  [key: string]: unknown;
+  [key: string]: string | number | object;
+}
+
+// In-memory buffer for monitor (last 100 entries)
+const logBuffer: LogEntry[] = [];
+const MAX_BUFFER_SIZE = 100;
+
+// Callback for monitor route
+let onLogCallback: ((log: LogEntry) => void) | null = null;
+
+export function setLogCallback(callback: (log: LogEntry) => void) {
+  onLogCallback = callback;
+}
+
+export function getLogBuffer(): LogEntry[] {
+  return logBuffer;
 }
 
 const writeLog = (logEntry: LogEntry) => {
   Bun.stdout.write(JSON.stringify(logEntry) + "\n");
+  
+  // Add to buffer for monitor
+  logBuffer.push(logEntry);
+  if (logBuffer.length > MAX_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+  
+  // Notify monitor
+  if (onLogCallback) {
+    onLogCallback(logEntry);
+  }
 };
 
 export class Logger {

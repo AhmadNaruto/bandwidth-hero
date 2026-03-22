@@ -3,13 +3,14 @@
 
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
-import logger from "./utils/logger.js";
+import logger, { setLogCallback } from "./utils/logger.js";
 import { rateLimitPlugin } from "./middleware/rate-limit.js";
 import { loggingPlugin } from "./middleware/logging.js";
 import { RequestQueue } from "./middleware/queue.js";
 import { healthRoutes } from "./routes/health.js";
 import { proxyRoutes } from "./routes/proxy.js";
 import { queueStatusRoute } from "./routes/queue.js";
+import { monitorRoute } from "./routes/monitor.js";
 
 // Guard: Only allow running via systemd in production
 const isSystemdManaged =
@@ -67,6 +68,9 @@ const app = new Elysia({ name: "bandwidth-hero" })
 
   // Request logging
   .use(loggingPlugin())
+
+  // Monitor route (real-time logs)
+  .use(monitorRoute())
 
   // Health check routes
   .use(healthRoutes({
