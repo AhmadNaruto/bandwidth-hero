@@ -46,10 +46,6 @@ const CONFIG = {
   // Memory monitoring
   MEMORY_CHECK_INTERVAL: 30000,
 
-  // Upstream circuit breaker
-  UPSTREAM_FAILURE_THRESHOLD: 5,
-  UPSTREAM_CIRCUIT_BREAKER_TIMEOUT: 30000,
-
   // Request queue - worker pool for upstream requests
   QUEUE_ENABLED: true,
   WORKER_COUNT: 3,
@@ -94,15 +90,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Memory monitoring and circuit breaker
-// DISABLED: Circuit breaker disabled per user request
-let memoryCircuitBreaker = false;
-let memoryCircuitBreakerUntil = 0;
+// Memory monitoring
 let memoryCheckCount = 0;
-let baselineHeapUsed = 0;
 
 const checkMemoryHealth = () => {
-  // Circuit breaker disabled - always return true
   return true;
 };
 
@@ -114,7 +105,6 @@ setInterval(() => {
     heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024),
     heapUsedPercent: ((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(2),
     rss: Math.round(memUsage.rss / 1024 / 1024),
-    circuitBreaker: memoryCircuitBreaker,
   });
 }, CONFIG.MEMORY_CHECK_INTERVAL);
 
@@ -166,11 +156,6 @@ let requestIdCounter = 0;
 
 // Concurrency tracking
 let activeRequests = 0;
-
-// Upstream circuit breaker state
-let upstreamFailureCount = 0;
-let upstreamCircuitBreakerOpen = false;
-let upstreamCircuitBreakerResetTime = 0;
 
 // Request queue for worker pool
 const requestQueue = [];
@@ -325,12 +310,6 @@ const assignToWorker = async () => {
 
 // Rate limiting middleware
 app.use((req, res, next) => {
-  // Check memory circuit breaker
-  if (!checkMemoryHealth()) {
-    logger.warn("Request rejected - memory circuit breaker active", { path: req.path });
-    return res.status(503).json({ error: "Service temporarily unavailable - memory pressure" });
-  }
-  
   // Check concurrent request limit
   if (activeRequests >= CONFIG.MAX_CONCURRENT_REQUESTS) {
     logger.warn("Request rejected - max concurrent requests reached", {
@@ -431,23 +410,6 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
         success: false,
         queueError: true,
       };
-    }
-  }
-
-  // Check upstream circuit breaker
-  if (upstreamCircuitBreakerOpen) {
-    if (Date.now() < upstreamCircuitBreakerResetTime) {
-      logger.warn("Upstream circuit breaker open, rejecting request", { url });
-      return {
-        response: { status: 503, headers: { get: () => null, entries: () => [] } },
-        fetchTime: Date.now() - fetchStartTime,
-        success: false,
-        circuitBreaker: true,
-      };
-    } else {
-      // Half-open state - allow one request to test
-      upstreamCircuitBreakerOpen = false;
-      logger.info("Upstream circuit breaker half-open, testing", { url });
     }
   }
 
@@ -573,12 +535,6 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
         });
       }
 
-      // Reset failure count on success
-      if (upstreamFailureCount > 0 && statusCode >= 200 && statusCode < 300) {
-        upstreamFailureCount = 0;
-        logger.debug("Upstream circuit breaker failure count reset", { url });
-      }
-
       return {
         response: {
           ok: statusCode >= 200 && statusCode < 300,
@@ -620,9 +576,6 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
 
   // All retries failed or non-retryable error
   const fetchTime = Date.now() - fetchStartTime;
-
-  // Increment failure count
-  upstreamFailureCount++;
   const errorMessage = lastError?.message || lastError?.code || 'Unknown error';
   const errorStatusCode = lastError?.status || 500;
 
@@ -630,7 +583,6 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
     url,
     error: errorMessage,
     statusCode: errorStatusCode,
-    failureCount: upstreamFailureCount,
     attempts: MAX_RETRIES + 1,
   });
 
@@ -640,18 +592,6 @@ const fetchUpstreamImage = async (url, headers, ip, abortSignal) => {
       url,
       referer: fetchHeaders["referer"],
       acceptEncoding: fetchHeaders["accept-encoding"],
-      failureCount: upstreamFailureCount,
-    });
-  }
-
-  // Open circuit breaker if threshold reached
-  if (upstreamFailureCount >= CONFIG.UPSTREAM_FAILURE_THRESHOLD) {
-    upstreamCircuitBreakerOpen = true;
-    upstreamCircuitBreakerResetTime = Date.now() + CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT;
-    logger.warn("Upstream circuit breaker opened", {
-      url,
-      failureCount: upstreamFailureCount,
-      resetIn: CONFIG.UPSTREAM_CIRCUIT_BREAKER_TIMEOUT,
     });
   }
 
@@ -829,8 +769,6 @@ app.get("/health/detailed", (req, res) => {
       metrics: { ...queueMetrics },
     },
     activeRequests,
-    memoryCircuitBreaker,
-    upstreamCircuitBreaker: upstreamCircuitBreakerOpen,
     timestamp: new Date().toISOString(),
   };
 
@@ -839,7 +777,7 @@ app.get("/health/detailed", (req, res) => {
   const isHeapCritical = health.memory.heapUsed > 1024;
   const isQueueFull = requestQueue.length >= CONFIG.QUEUE_MAX_SIZE;
 
-  if (isRssCritical || isHeapCritical || memoryCircuitBreaker) {
+  if (isRssCritical || isHeapCritical) {
     health.status = "degraded";
     res.status(503);
   } else if (isQueueFull) {
