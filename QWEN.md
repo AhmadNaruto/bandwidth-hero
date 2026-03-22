@@ -13,12 +13,11 @@
 - **Grayscale Conversion**: Optional grayscale mode for further file size reduction
 
 ### Tech Stack
-- **Runtime**: Node.js >= 20.0.0 (ES Modules)
+- **Runtime**: Bun >= 1.0.0 (ES Modules)
 - **Framework**: Express.js
 - **Image Processing**: Sharp
 - **HTTP Client**: Got
-- **Testing**: Jest (with node:test compatibility)
-- **Bundler**: esbuild
+- **Testing**: Bun test
 
 ## Project Structure
 
@@ -30,13 +29,11 @@ bandwidth-hero/
 │   ├── pick.js           # Case-insensitive object property picker
 │   └── shouldCompress.js # Compression decision logic
 ├── tests/
-│   ├── index.test.mjs    # Unit and integration tests
-│   └── setupTests.mjs    # Jest setup configuration
+│   └── index.test.mjs    # Unit and integration tests
 ├── docs/
 │   ├── logging-system.md # Logging system documentation
 │   └── sample-logs.md    # Example log outputs
 ├── server.js             # Express server (main entry point)
-├── jest.config.cjs       # Jest test configuration
 ├── DEPLOYMENT.md         # VPS deployment guide
 └── package.json          # Dependencies and scripts
 ```
@@ -44,28 +41,28 @@ bandwidth-hero/
 ## Building and Running
 
 ### Prerequisites
-- Node.js >= 20.0.0
+- Bun >= 1.0.0
 
 ### Installation
 ```bash
-npm install
+bun install
 ```
 
 ### Development
 ```bash
 # Start local development server with auto-reload
-npm run dev
+bun run --watch server.js
 ```
 
 The server will be available at: `http://localhost:8080`
 
 ### Testing
 ```bash
-npm test
+bun test
 ```
 
 ### Deployment
-See [DEPLOYMENT.md](DEPLOYMENT.md) for VPS deployment instructions using PM2 or systemd.
+See [DEPLOYMENT.md](DEPLOYMENT.md) for VPS deployment instructions using systemd.
 
 ## API Usage
 
@@ -111,7 +108,7 @@ GET /api/index?url=<image_url>&jpeg=<0|1>&bw=<0|1>&l=<quality>
   - `LOG_ENABLED`: Enable/disable logging (default: `true`)
 
 ### Testing Practices
-- Tests use `node:test` and `node:assert` (Node.js built-in)
+- Tests use Bun test (`bun test`)
 - Test files use `.mjs` extension
 - Mock `console.log` to keep terminal clean during tests
 - Integration tests use real URLs (e.g., picsum.photos)
@@ -134,9 +131,9 @@ The following headers are forwarded to upstream servers for Cloudflare compatibi
 ### package.json Scripts
 ```json
 {
-  "start": "node server.js",
-  "dev": "node --watch server.js",
-  "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  "start": "bun run server.js",
+  "dev": "bun run --watch server.js",
+  "test": "bun test"
 }
 ```
 

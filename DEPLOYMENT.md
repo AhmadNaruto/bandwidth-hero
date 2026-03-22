@@ -3,7 +3,7 @@
 ## Prerequisites
 - VPS with Ubuntu/Debian or CentOS/RHEL
 - Bun runtime (latest version)
-- systemd or PM2
+- systemd
 
 ## Quick Start
 
@@ -154,11 +154,6 @@ curl https://your-domain.com/health
 
 ## Monitoring
 
-### View Logs with PM2
-```bash
-pm2 logs bandwidth-hero
-```
-
 ### View Logs with systemd
 ```bash
 sudo journalctl -u bandwidth-hero -f
@@ -178,7 +173,7 @@ Log levels: `error`, `warn`, `info`, `debug`, `trace`
 ### Increase Bun Memory Limit
 ```bash
 # In systemd service, add to ExecStart
-ExecStart=/home/ubuntu/.bun/bin/bun run --max-old-space-size=512 server.js
+ExecStart=/home/ubuntu/.bun/bin/bun run --max-heap-size=512M server.js
 ```
 
 ### Adjust Sharp Concurrency

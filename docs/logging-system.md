@@ -138,7 +138,7 @@ For compression errors:
 The logger is available as a singleton:
 
 ```javascript
-const logger = require('./util/logger');
+import logger from './util/logger.js';
 
 // Basic logging
 logger.info('Operation completed');
@@ -163,7 +163,7 @@ logger.logRequest({
 
 The new logging system has been integrated into:
 
-1. `functions/index.js` - Main compression handler
+1. `server.js` - Main compression handler
 2. `util/compress.js` - Image compression utility
 3. `util/logger.js` - The logging utility itself
 

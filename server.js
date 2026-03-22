@@ -67,10 +67,11 @@ const CONFIG = {
   UPSTREAM_FAILURE_THRESHOLD: 5, // failures before opening circuit
   UPSTREAM_CIRCUIT_BREAKER_TIMEOUT: 30000, // 30s before half-open
 
-  // Request queue - rate limiting for upstream requests
+  // Request queue - worker pool for upstream requests
   QUEUE_ENABLED: true,
-  QUEUE_MIN_DELAY: 500, // Minimum delay between requests (ms)
-  QUEUE_MAX_DELAY: 1000, // Maximum delay between requests (ms)
+  WORKER_COUNT: 3, // Number of concurrent workers
+  WORKER_MIN_DELAY: 500, // Minimum delay between requests per worker (ms)
+  WORKER_MAX_DELAY: 1000, // Maximum delay between requests per worker (ms)
   QUEUE_MAX_SIZE: 100, // Maximum queue size
   QUEUE_TIMEOUT: 120000, // Maximum time a request can wait in queue (ms)
 };
@@ -129,62 +130,15 @@ app.use((req, res, next) => {
 });
 
 // Memory monitoring and circuit breaker
+// DISABLED: Circuit breaker disabled per user request
 let memoryCircuitBreaker = false;
 let memoryCircuitBreakerUntil = 0;
 let memoryCheckCount = 0;
 let baselineHeapUsed = 0;
 
 const checkMemoryHealth = () => {
-  const memUsage = process.memoryUsage();
-  const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-  const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
-  const rssMB = Math.round(memUsage.rss / 1024 / 1024);
-  
-  // Calculate heap percentage, but don't rely on it solely
-  // V8 pre-allocates heap, so heapUsed/heapTotal can be misleading
-  const heapUsedPercent = memUsage.heapUsed / memUsage.heapTotal;
-  
-  // Skip first 10 checks to allow Node.js V8 to stabilize (~5 minutes)
-  memoryCheckCount++;
-  if (memoryCheckCount < 10) {
-    if (memoryCheckCount === 1) {
-      baselineHeapUsed = heapUsedMB;
-      logger.info("Memory baseline established", { baselineHeapUsed, heapTotalMB });
-    }
-    return true;
-  }
-  
-  // Reset circuit breaker after cooldown
-  if (memoryCircuitBreaker && Date.now() > memoryCircuitBreakerUntil) {
-    memoryCircuitBreaker = false;
-    logger.warn("Memory circuit breaker reset", { 
-      heapUsedMB,
-      heapTotalMB,
-      heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
-      rssMB 
-    });
-  }
-  
-  // Circuit breaker triggers only on actual memory pressure:
-  // 1. RSS > 1.5GB (actual memory usage, not V8 heap)
-  // 2. OR heapUsed > 1GB (absolute, not percentage)
-  // This avoids false positives from V8's aggressive heap pre-allocation
-  const isRssCritical = rssMB > 1536; // 1.5GB
-  const isHeapCritical = heapUsedMB > 1024; // 1GB absolute
-  
-  if (!memoryCircuitBreaker && (isRssCritical || isHeapCritical)) {
-    memoryCircuitBreaker = true;
-    memoryCircuitBreakerUntil = Date.now() + CONFIG.MEMORY_CIRCUIT_BREAKER_COOLDOWN;
-    logger.error("Memory circuit breaker triggered", {
-      heapUsedMB,
-      heapTotalMB,
-      heapUsedPercent: (heapUsedPercent * 100).toFixed(2),
-      rssMB,
-      reason: isRssCritical ? "rss_critical" : "heap_critical",
-    });
-  }
-  
-  return !memoryCircuitBreaker;
+  // Circuit breaker disabled - always return true
+  return true;
 };
 
 // Periodic memory health check
@@ -201,6 +155,9 @@ setInterval(() => {
 
 // Periodic queue metrics reset (prevent overflow, reset hourly)
 setInterval(() => {
+  const busyWorkers = workers.filter(w => w.busy).length;
+  const totalWorkerProcessed = workers.reduce((sum, w) => sum + w.requestsProcessed, 0);
+  
   // Log hourly metrics summary
   logger.info("Queue metrics summary", {
     processed: queueMetrics.totalProcessed,
@@ -209,8 +166,12 @@ setInterval(() => {
     rejected: queueMetrics.totalRejected,
     avgWaitTime: queueMetrics.averageWaitTime,
     maxWaitTime: queueMetrics.maxWaitTime,
+    workers: {
+      busy: busyWorkers,
+      totalProcessed: totalWorkerProcessed,
+    },
   });
-  
+
   // Reset counters (keep max for historical reference)
   queueMetrics.totalProcessed = 0;
   queueMetrics.totalTimeouts = 0;
@@ -246,10 +207,19 @@ let upstreamFailureCount = 0;
 let upstreamCircuitBreakerOpen = false;
 let upstreamCircuitBreakerResetTime = 0;
 
-// Request queue for rate limiting upstream requests
+// Request queue for worker pool
 const requestQueue = [];
-let queueProcessing = false;
-let lastUpstreamRequestTime = 0;
+
+// Worker pool - 3 concurrent workers
+const workers = [];
+for (let i = 0; i < CONFIG.WORKER_COUNT; i++) {
+  workers.push({
+    id: i,
+    busy: false,
+    lastRequestTime: 0,
+    requestsProcessed: 0,
+  });
+}
 
 // Queue metrics for monitoring
 const queueMetrics = {
@@ -262,7 +232,7 @@ const queueMetrics = {
   maxWaitTime: 0,
 };
 
-// Add request to queue and wait for turn
+// Add request to queue and assign to available worker
 const enqueueUpstreamRequest = (abortSignal) => {
   return new Promise((resolve, reject) => {
     if (!CONFIG.QUEUE_ENABLED) {
@@ -303,85 +273,89 @@ const enqueueUpstreamRequest = (abortSignal) => {
     const position = requestQueue.length;
     logger.trace("Request added to queue", { position, queueSize: requestQueue.length });
 
-    // Process queue if not already processing
-    if (!queueProcessing) {
-      processQueue();
-    }
+    // Try to assign to available worker
+    assignToWorker();
   });
 };
 
-// Process queue with delay between requests
-const processQueue = async () => {
-  if (queueProcessing || requestQueue.length === 0) return;
+// Find available worker
+const findAvailableWorker = () => {
+  return workers.find(worker => !worker.busy);
+};
 
-  queueProcessing = true;
+// Assign queue entry to worker
+const assignToWorker = async () => {
+  if (requestQueue.length === 0) return;
 
-  try {
-    while (requestQueue.length > 0) {
-      const entry = requestQueue[0];
+  const worker = findAvailableWorker();
+  if (!worker) return; // No available workers
 
-      // Check if request was aborted
-      if (entry.abortSignal?.aborted) {
-        requestQueue.shift();
-        if (entry.timeoutId) clearTimeout(entry.timeoutId);
-        queueMetrics.totalAborted++;
-        entry.reject(new Error("Request aborted"));
-        continue;
-      }
+  const entry = requestQueue[0];
 
-      // Check if queue timeout exceeded
-      const waitTime = Date.now() - entry.addedAt;
-      if (waitTime >= CONFIG.QUEUE_TIMEOUT) {
-        requestQueue.shift();
-        if (entry.timeoutId) clearTimeout(entry.timeoutId);
-        queueMetrics.totalTimeouts++;
-        entry.reject(new Error("Queue timeout"));
-        continue;
-      }
-
-      // Calculate delay since last request
-      const timeSinceLastRequest = Date.now() - lastUpstreamRequestTime;
-      const minDelay = CONFIG.QUEUE_MIN_DELAY;
-      const maxDelay = CONFIG.QUEUE_MAX_DELAY;
-      const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
-
-      if (timeSinceLastRequest < randomDelay) {
-        const sleepTime = randomDelay - timeSinceLastRequest;
-        logger.trace("Queue waiting", { sleepTime, queuePosition: 1 });
-        await new Promise(resolve => setTimeout(resolve, sleepTime));
-      }
-
-      // Update last request time
-      lastUpstreamRequestTime = Date.now();
-
-      // Remove from queue and resolve
-      requestQueue.shift();
-      if (entry.timeoutId) clearTimeout(entry.timeoutId);
-      
-      // Update metrics
-      const actualWaitTime = Date.now() - entry.addedAt;
-      queueMetrics.totalProcessed++;
-      queueMetrics.lastWaitTime = actualWaitTime;
-      queueMetrics.maxWaitTime = Math.max(queueMetrics.maxWaitTime, actualWaitTime);
-      // Calculate rolling average (simple moving average)
-      queueMetrics.averageWaitTime = Math.round(
-        (queueMetrics.averageWaitTime * (queueMetrics.totalProcessed - 1) + actualWaitTime) / queueMetrics.totalProcessed
-      );
-      
-      entry.resolve();
-
-      // Log queue status periodically
-      if (requestQueue.length > 0 && queueMetrics.totalProcessed % 10 === 0) {
-        logger.debug("Queue processing", { remaining: requestQueue.length, processed: queueMetrics.totalProcessed });
-      }
-    }
-  } catch (error) {
-    logger.error("Queue processing error", { error: error.message });
-    queueProcessing = false;
-    throw error;
+  // Check if request was aborted
+  if (entry.abortSignal?.aborted) {
+    requestQueue.shift();
+    if (entry.timeoutId) clearTimeout(entry.timeoutId);
+    queueMetrics.totalAborted++;
+    entry.reject(new Error("Request aborted"));
+    return;
   }
 
-  queueProcessing = false;
+  // Check if queue timeout exceeded
+  const waitTime = Date.now() - entry.addedAt;
+  if (waitTime >= CONFIG.QUEUE_TIMEOUT) {
+    requestQueue.shift();
+    if (entry.timeoutId) clearTimeout(entry.timeoutId);
+    queueMetrics.totalTimeouts++;
+    entry.reject(new Error("Queue timeout"));
+    return;
+  }
+
+  // Calculate delay since last request for this worker
+  const timeSinceLastRequest = Date.now() - worker.lastRequestTime;
+  const minDelay = CONFIG.WORKER_MIN_DELAY;
+  const maxDelay = CONFIG.WORKER_MAX_DELAY;
+  const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+
+  if (timeSinceLastRequest < randomDelay) {
+    const sleepTime = randomDelay - timeSinceLastRequest;
+    logger.trace("Worker waiting", { workerId: worker.id, sleepTime });
+    await new Promise(resolve => setTimeout(resolve, sleepTime));
+  }
+
+  // Remove from queue and mark worker busy
+  requestQueue.shift();
+  if (entry.timeoutId) clearTimeout(entry.timeoutId);
+
+  worker.busy = true;
+  worker.lastRequestTime = Date.now();
+
+  // Update metrics
+  const actualWaitTime = Date.now() - entry.addedAt;
+  queueMetrics.totalProcessed++;
+  queueMetrics.lastWaitTime = actualWaitTime;
+  queueMetrics.maxWaitTime = Math.max(queueMetrics.maxWaitTime, actualWaitTime);
+  // Calculate rolling average (simple moving average)
+  queueMetrics.averageWaitTime = Math.round(
+    (queueMetrics.averageWaitTime * (queueMetrics.totalProcessed - 1) + actualWaitTime) / queueMetrics.totalProcessed
+  );
+
+  logger.trace("Worker assigned", { workerId: worker.id, queueRemaining: requestQueue.length });
+
+  // Resolve and mark worker as available after delay
+  entry.resolve();
+
+  // Mark worker as available after a brief period (allow upstream request to complete)
+  setTimeout(() => {
+    worker.busy = false;
+    worker.requestsProcessed++;
+    logger.trace("Worker released", { workerId: worker.id, processed: worker.requestsProcessed });
+    // Try to assign next request in queue
+    assignToWorker();
+  }, 100); // Brief delay to allow upstream request to start
+
+  // Try to assign more requests to other workers
+  assignToWorker();
 };
 
 // Rate limiting middleware
@@ -801,12 +775,17 @@ app.get("/queue/status", (req, res) => {
   res.json({
     queue: {
       size: requestQueue.length,
-      processing: queueProcessing,
     },
+    workers: workers.map(w => ({
+      id: w.id,
+      busy: w.busy,
+      requestsProcessed: w.requestsProcessed,
+    })),
     limits: {
+      workerCount: CONFIG.WORKER_COUNT,
+      minDelay: CONFIG.WORKER_MIN_DELAY,
+      maxDelay: CONFIG.WORKER_MAX_DELAY,
       maxSize: CONFIG.QUEUE_MAX_SIZE,
-      minDelay: CONFIG.QUEUE_MIN_DELAY,
-      maxDelay: CONFIG.QUEUE_MAX_DELAY,
       timeout: CONFIG.QUEUE_TIMEOUT,
     },
     metrics: { ...queueMetrics },
@@ -817,6 +796,7 @@ app.get("/queue/status", (req, res) => {
 // Comprehensive health check endpoint
 app.get("/health/detailed", (req, res) => {
   const memUsage = process.memoryUsage();
+  const busyWorkers = workers.filter(w => w.busy).length;
   const health = {
     status: "ok",
     uptime: process.uptime(),
@@ -828,7 +808,11 @@ app.get("/health/detailed", (req, res) => {
     },
     queue: {
       size: requestQueue.length,
-      processing: queueProcessing,
+      workers: {
+        total: CONFIG.WORKER_COUNT,
+        busy: busyWorkers,
+        available: CONFIG.WORKER_COUNT - busyWorkers,
+      },
       metrics: { ...queueMetrics },
     },
     activeRequests,
@@ -1017,6 +1001,12 @@ server.listen(PORT, () => {
     health: `http://localhost:${PORT}/health`,
     ready: `http://localhost:${PORT}/ready`,
     api: `http://localhost:${PORT}/api/index`,
+    queueStatus: `http://localhost:${PORT}/queue/status`,
+    workerPool: {
+      workers: CONFIG.WORKER_COUNT,
+      minDelay: `${CONFIG.WORKER_MIN_DELAY}ms`,
+      maxDelay: `${CONFIG.WORKER_MAX_DELAY}ms`,
+    },
     maxConcurrentRequests: CONFIG.MAX_CONCURRENT_REQUESTS,
     memoryThreshold: `${CONFIG.MEMORY_THRESHOLD_PERCENT * 100}%`,
   });

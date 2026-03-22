@@ -13,7 +13,7 @@ This is a data compression service used by the [Bandwidth Hero](https://github.c
 - **On-the-fly Image Compression**: Converts images to WebP/AVIF/JPEG with adjustable quality
 - **Modern Logging System**: Structured JSON logging with multiple log levels
 - **Cloudflare Compatibility**: Forwards browser headers to avoid bot detection
-- **VPS Deployment**: Deploy on any VPS or Node.js host
+- **VPS Deployment**: Deploy on any VPS or Bun host
 - **Format Options**: WebP, AVIF, and JPEG output with quality control
 - **Grayscale Mode**: Optional grayscale conversion for smaller file sizes
 - **Smart Compression**: Bypasses compression for images that won't benefit
@@ -26,10 +26,10 @@ This is a data compression service used by the [Bandwidth Hero](https://github.c
 # Clone and install
 git clone https://github.com/your-username/bandwidth-hero-proxy.git
 cd bandwidth-hero-proxy
-npm install --production
+bun install --production
 
 # Start server
-npm start
+bun run server.js
 ```
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
@@ -119,13 +119,13 @@ See [docs/logging-system.md](docs/logging-system.md) for full documentation.
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
 # Start dev server (auto-reload)
-npm run dev
+bun run --watch server.js
 
 # Run tests
-npm test
+bun test
 ```
 
 ## Project Structure

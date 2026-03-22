@@ -34,7 +34,11 @@ curl http://localhost:8080/health/detailed | jq .
   },
   "queue": {
     "size": 5,
-    "processing": true,
+    "workers": {
+      "total": 3,
+      "busy": 1,
+      "available": 2
+    },
     "metrics": {
       "totalProcessed": 150,
       "totalTimeouts": 2,
@@ -66,13 +70,30 @@ curl http://localhost:8080/queue/status | jq .
 ```json
 {
   "queue": {
-    "size": 3,
-    "processing": true
+    "size": 3
   },
+  "workers": [
+    {
+      "id": 0,
+      "busy": false,
+      "requestsProcessed": 50
+    },
+    {
+      "id": 1,
+      "busy": true,
+      "requestsProcessed": 48
+    },
+    {
+      "id": 2,
+      "busy": false,
+      "requestsProcessed": 49
+    }
+  ],
   "limits": {
-    "maxSize": 100,
+    "workerCount": 3,
     "minDelay": 500,
     "maxDelay": 1000,
+    "maxSize": 100,
     "timeout": 120000
   },
   "metrics": {
@@ -218,11 +239,11 @@ Untuk integrasi dengan Prometheus, tambahkan endpoint metrics:
 app.get("/metrics", (req, res) => {
   const memUsage = process.memoryUsage();
   const metrics = `
-# HELP node_memory_usage_bytes Memory usage in bytes
-# TYPE node_memory_usage_bytes gauge
-node_memory_heap_used_bytes ${memUsage.heapUsed}
-node_memory_heap_total_bytes ${memUsage.heapTotal}
-node_memory_rss_bytes ${memUsage.rss}
+# HELP process_memory_usage_bytes Memory usage in bytes
+# TYPE process_memory_usage_bytes gauge
+process_memory_heap_used_bytes ${memUsage.heapUsed}
+process_memory_heap_total_bytes ${memUsage.heapTotal}
+process_memory_rss_bytes ${memUsage.rss}
 
 # HELP queue_size Current queue size
 # TYPE queue_size gauge
@@ -304,7 +325,7 @@ QUEUE_TIMEOUT=60000
 ```bash
 # Set memory limit for Bun
 # In bandwidth-hero.service, add to ExecStart:
-ExecStart=/home/ubuntu/.bun/bin/bun run --max-old-space-size=512 server.js
+ExecStart=/home/ubuntu/.bun/bin/bun run --max-heap-size=512M server.js
 ```
 
 ### Sharp Concurrency
