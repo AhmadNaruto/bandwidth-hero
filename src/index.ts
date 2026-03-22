@@ -3,7 +3,7 @@
 
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
-import logger, { setLogCallback } from "./utils/logger.js";
+import logger from "./utils/logger.js";
 import { loggingPlugin } from "./middleware/logging.js";
 import { RequestQueue } from "./middleware/queue.js";
 import { healthRoutes } from "./routes/health.js";

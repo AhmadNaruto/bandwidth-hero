@@ -16,34 +16,11 @@ const logBuffer: LogEntry[] = [];
 const MAX_BUFFER_SIZE = 100;
 
 // SSE clients for real-time broadcast
-const sseClients: Set<(data: string) => void> = new Set();
-
 // Callback for monitor route
 let onLogCallback: ((log: LogEntry) => void) | null = null;
 
-export function setLogCallback(callback: (log: LogEntry) => void) {
-  onLogCallback = callback;
-}
-
 export function getLogBuffer(): LogEntry[] {
   return logBuffer;
-}
-
-export function addSSEClient(sendFn: (data: string) => void): () => void {
-  sseClients.add(sendFn);
-  return () => sseClients.delete(sendFn);
-}
-
-export function broadcastToSSE(log: LogEntry) {
-  const data = JSON.stringify(log);
-  const message = `data: ${data}\n\n`;
-  sseClients.forEach(sendFn => {
-    try {
-      sendFn(message);
-    } catch (e) {
-      // Client disconnected
-    }
-  });
 }
 
 export function addLogToBuffer(log: LogEntry) {
@@ -51,9 +28,6 @@ export function addLogToBuffer(log: LogEntry) {
   if (logBuffer.length > MAX_BUFFER_SIZE) {
     logBuffer.shift();
   }
-  
-  // Broadcast to all SSE clients in real-time
-  broadcastToSSE(log);
   
   // Notify monitor
   if (onLogCallback) {
@@ -167,14 +141,6 @@ export class Logger {
         format: format || "Unknown",
       };
       addLogToBuffer(logEntry);
-      this.info("Image Zip", {
-        savings: this.formatBytes(bytesSaved || 0),
-        percent: originalSize && compressedSize
-          ? `${((originalSize - compressedSize) / originalSize * 100).toFixed(1)}%`
-          : "Unknown",
-        quality,
-        format: format || "Unknown",
-      });
     }
   }
 
