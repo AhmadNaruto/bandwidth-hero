@@ -50,17 +50,22 @@ const createImageResponse = (
   buffer: Buffer,
   contentType: string,
   additionalHeaders: Record<string, string> = {}
-) => ({
-  headers: {
+) => {
+  const headers = {
     "content-type": contentType,
-    "content-length": buffer.length,
+    "content-length": buffer.length.toString(),
     "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
     pragma: "no-cache",
     expires: "0",
     ...additionalHeaders,
-  },
-  body: buffer,
-});
+  };
+
+  // Return Response object for proper binary handling
+  return new Response(buffer, { 
+    headers,
+    status: 200,
+  });
+};
 
 const sanitizeResponseHeaders = (headers: Record<string, string>): Record<string, string> => {
   const sanitized = { ...headers };
@@ -192,6 +197,7 @@ export function proxyRoutes(options: ProxyOptions) {
 
         if (err.name === "AbortError" || err.message.includes("timed out")) {
           set.status = 408;
+          set.headers["content-type"] = "application/json";
           return { error: "Request timeout" };
         }
 
@@ -201,6 +207,7 @@ export function proxyRoutes(options: ProxyOptions) {
         });
 
         set.status = 500;
+        set.headers["content-type"] = "application/json";
         return { error: err.message };
       }
     }, {
