@@ -84,124 +84,352 @@ function getMonitorHtml() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bandwidth Hero - Log Monitor</title>
   <style>
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #12121a;
+      --bg-card: #1a1a2e;
+      --text-primary: #ffffff;
+      --text-secondary: #a0a0b0;
+      --accent-cyan: #00d9ff;
+      --accent-green: #00ff88;
+      --accent-orange: #ffaa00;
+      --accent-red: #ff4466;
+      --accent-purple: #aa66ff;
+      --accent-blue: #4488ff;
+      --border-color: #2a2a3e;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    
     body {
       font-family: 'Courier New', monospace;
-      background: #1a1a2e;
-      color: #eee;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+      min-height: 100vh;
       padding: 20px;
     }
-    .container { max-width: 1400px; margin: 0 auto; }
-    h1 { color: #00d9ff; margin-bottom: 20px; font-size: 24px; }
+
+    .container { max-width: 1600px; margin: 0 auto; }
+    
+    h1 {
+      color: var(--accent-cyan);
+      margin-bottom: 20px;
+      font-size: 28px;
+      text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
+    }
+    
     .stats {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-bottom: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
     }
+    
     .stat-card {
-      background: #16213e;
-      padding: 15px;
-      border-radius: 8px;
-      border-left: 4px solid #00d9ff;
+      background: var(--bg-card);
+      padding: 24px;
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
     }
-    .stat-value { font-size: 28px; font-weight: bold; color: #00d9ff; }
-    .stat-label { font-size: 12px; color: #888; margin-top: 5px; }
+    
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-green));
+    }
+    
+    .stat-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0, 217, 255, 0.2);
+    }
+    
+    .stat-card.error::before {
+      background: linear-gradient(90deg, var(--accent-red), var(--accent-orange));
+    }
+    
+    .stat-card.warn::before {
+      background: linear-gradient(90deg, var(--accent-orange), var(--accent-red));
+    }
+    
+    .stat-value {
+      font-size: 36px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .stat-card.error .stat-value {
+      background: linear-gradient(135deg, var(--accent-red), var(--accent-orange));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .stat-label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
     .filters {
       display: flex;
       gap: 10px;
       margin-bottom: 20px;
       flex-wrap: wrap;
+      padding: 20px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
     }
+    
     .filter-btn {
-      padding: 8px 16px;
+      padding: 10px 18px;
       border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .filter-btn.active { background: #00d9ff; color: #1a1a2e; }
-    .filter-btn[data-level="ERROR"] { background: #e74c3c; color: white; }
-    .filter-btn[data-level="WARN"] { background: #f39c12; color: white; }
-    .filter-btn[data-level="INFO"] { background: #27ae60; color: white; }
-    .filter-btn[data-level="DEBUG"] { background: #3498db; color: white; }
-    .filter-btn[data-level="TRACE"] { background: #9b59b6; color: white; }
-    .log-container {
-      background: #0f0f23;
       border-radius: 8px;
-      padding: 15px;
-      max-height: 70vh;
-      overflow-y: auto;
-    }
-    .log-entry {
-      padding: 8px 12px;
-      border-bottom: 1px solid #1a1a2e;
+      cursor: pointer;
       font-size: 13px;
-      display: grid;
-      grid-template-columns: 180px 80px 1fr;
-      gap: 15px;
-      animation: fadeIn 0.3s ease;
+      font-weight: 600;
+      font-family: inherit;
+      transition: all 0.2s ease;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
     }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateX(-10px); }
-      to { opacity: 1; transform: translateX(0); }
+    
+    .filter-btn:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent-cyan);
     }
-    .log-entry:hover { background: #16213e; }
-    .log-time { color: #888; }
-    .log-level { font-weight: bold; text-transform: uppercase; }
-    .log-level.ERROR { color: #e74c3c; }
-    .log-level.WARN { color: #f39c12; }
-    .log-level.INFO { color: #27ae60; }
-    .log-level.DEBUG { color: #3498db; }
-    .log-level.TRACE { color: #9b59b6; }
-    .log-message { color: #eee; word-break: break-word; }
-    .log-metadata {
-      grid-column: 2 / -1;
-      font-size: 11px;
-      color: #666;
-      margin-top: 5px;
+    
+    .filter-btn.active {
+      background: var(--accent-cyan);
+      color: var(--bg-primary);
+      border-color: var(--accent-cyan);
     }
-    .status-indicator {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #27ae60;
-      margin-right: 10px;
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
+    
+    .filter-btn[data-level="ERROR"].active { background: var(--accent-red); color: white; }
+    .filter-btn[data-level="WARN"].active { background: var(--accent-orange); color: var(--bg-primary); }
+    .filter-btn[data-level="INFO"].active { background: var(--accent-green); color: var(--bg-primary); }
+    .filter-btn[data-level="DEBUG"].active { background: var(--accent-blue); color: white; }
+    .filter-btn[data-level="TRACE"].active { background: var(--accent-purple); color: white; }
+    
     .auto-scroll {
       display: flex;
       align-items: center;
       gap: 10px;
       margin-bottom: 15px;
+      padding: 15px 20px;
+      background: var(--bg-card);
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
     }
-    .auto-scroll input { width: 18px; height: 18px; }
+    
+    .auto-scroll input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent-cyan);
+    }
+    
+    .clear-btn {
+      margin-left: auto;
+      padding: 10px 20px;
+      background: var(--accent-red);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-family: inherit;
+      transition: all 0.2s ease;
+    }
+    
+    .clear-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 68, 102, 0.4);
+    }
+    
+    .log-container {
+      background: var(--bg-card);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      padding: 20px;
+      max-height: 65vh;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    
+    .log-container::-webkit-scrollbar {
+      width: 8px;
+    }
+    
+    .log-container::-webkit-scrollbar-track {
+      background: var(--bg-secondary);
+      border-radius: 4px;
+    }
+    
+    .log-container::-webkit-scrollbar-thumb {
+      background: var(--accent-cyan);
+      border-radius: 4px;
+    }
+    
+    .log-entry {
+      padding: 14px 18px;
+      margin-bottom: 8px;
+      border-radius: 10px;
+      font-size: 13px;
+      display: grid;
+      grid-template-columns: 90px 85px 1fr;
+      gap: 16px;
+      align-items: start;
+      animation: slideIn 0.3s ease;
+      background: var(--bg-secondary);
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+    
+    .log-entry:hover {
+      background: var(--bg-primary);
+      border-color: var(--border-color);
+      transform: translateX(4px);
+    }
+    
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-20px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    
+    .log-time {
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .log-level {
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      display: inline-block;
+      text-align: center;
+    }
+    
+    .log-level.ERROR {
+      background: rgba(255, 68, 102, 0.15);
+      color: var(--accent-red);
+      border: 1px solid var(--accent-red);
+    }
+    
+    .log-level.WARN {
+      background: rgba(255, 170, 0, 0.15);
+      color: var(--accent-orange);
+      border: 1px solid var(--accent-orange);
+    }
+    
+    .log-level.INFO {
+      background: rgba(0, 255, 136, 0.15);
+      color: var(--accent-green);
+      border: 1px solid var(--accent-green);
+    }
+    
+    .log-level.DEBUG {
+      background: rgba(68, 136, 255, 0.15);
+      color: var(--accent-blue);
+      border: 1px solid var(--accent-blue);
+    }
+    
+    .log-level.TRACE {
+      background: rgba(170, 102, 255, 0.15);
+      color: var(--accent-purple);
+      border: 1px solid var(--accent-purple);
+    }
+    
+    .log-message {
+      color: var(--text-primary);
+      word-break: break-word;
+      line-height: 1.5;
+    }
+    
+    .log-metadata {
+      grid-column: 2 / -1;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    
+    .metadata-item {
+      background: var(--bg-primary);
+      padding: 4px 10px;
+      border-radius: 4px;
+      border: 1px solid var(--border-color);
+    }
+    
+    .metadata-label {
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+    
+    .status-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      margin-right: 10px;
+      animation: pulse 2s infinite;
+      box-shadow: 0 0 10px var(--accent-green);
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.2); }
+    }
+    
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-secondary);
+    }
+    
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1><span class="status-indicator"></span>Bandwidth Hero - Log Monitor</h1>
+    <h1>
+      <span class="status-indicator"></span>
+      🚀 Bandwidth Hero - Live Monitor
+    </h1>
     <div class="stats">
       <div class="stat-card">
         <div class="stat-value" id="totalLogs">0</div>
-        <div class="stat-label">Total Logs</div>
+        <div class="stat-label">📊 Total Logs</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card error">
         <div class="stat-value" id="errorCount">0</div>
-        <div class="stat-label">Errors</div>
+        <div class="stat-label">🔴 Errors</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card warn">
         <div class="stat-value" id="warnCount">0</div>
-        <div class="stat-label">Warnings</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="connStatus">Connected</div>
-        <div class="stat-label">SSE Status</div>
+        <div class="stat-label">🟡 Warnings</div>
       </div>
     </div>
     <div class="filters">
@@ -214,8 +442,8 @@ function getMonitorHtml() {
     </div>
     <div class="auto-scroll">
       <input type="checkbox" id="autoScroll" checked>
-      <label for="autoScroll">Auto-scroll to latest logs</label>
-      <button onclick="clearLogs()" style="margin-left: auto; padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">Clear Logs</button>
+      <label for="autoScroll">📜 Auto-scroll to latest logs</label>
+      <button class="clear-btn" onclick="clearLogs()">🗑 Clear Logs</button>
     </div>
     <div class="log-container" id="logContainer"></div>
   </div>
@@ -223,6 +451,8 @@ function getMonitorHtml() {
     let currentFilter = 'ALL';
     const logContainer = document.getElementById('logContainer');
     const autoScrollCheckbox = document.getElementById('autoScroll');
+    const statusDot = document.querySelector('.status-indicator');
+    const statusText = document.querySelector('.status-indicator + span');
     const eventSource = new EventSource('/monitor/stream');
     eventSource.onmessage = (event) => {
       try {
@@ -232,12 +462,14 @@ function getMonitorHtml() {
       } catch (e) { console.error('Failed to parse log:', e); }
     };
     eventSource.onerror = () => {
-      document.getElementById('connStatus').textContent = 'Disconnected';
-      document.getElementById('connStatus').style.color = '#e74c3c';
+      statusDot.classList.add('error');
+      statusDot.style.background = '#ff4466';
+      statusText.textContent = 'Disconnected';
     };
     eventSource.onopen = () => {
-      document.getElementById('connStatus').textContent = 'Connected';
-      document.getElementById('connStatus').style.color = '#27ae60';
+      statusDot.classList.remove('error');
+      statusDot.style.background = '#00ff88';
+      statusText.textContent = 'Connected';
     };
     function addLogEntry(log) {
       if (currentFilter !== 'ALL' && log.level !== currentFilter) return;
