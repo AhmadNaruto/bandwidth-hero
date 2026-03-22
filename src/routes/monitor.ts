@@ -624,52 +624,58 @@ function getMonitorHtml() {
   </div>
   <script>
     let currentFilter = 'ALL';
+    let lastLogTimestamp = null;
     const logContainer = document.getElementById('logContainer');
     const autoScrollCheckbox = document.getElementById('autoScroll');
     const statusDot = document.querySelector('.status-indicator');
     const statusText = document.querySelector('.status-indicator + span');
-    const eventSource = new EventSource('/monitor/sse');
-    eventSource.onmessage = (event) => {
-      try {
-        const log = JSON.parse(event.data);
-        addLogEntry(log);
-        updateStats();
-      } catch (e) { console.error('Failed to parse log:', e); }
-    };
-    eventSource.onerror = () => {
-      statusDot.classList.add('error');
-      statusDot.style.background = '#ff4466';
-      statusText.textContent = 'Disconnected';
-    };
-    eventSource.onopen = () => {
-      statusDot.classList.remove('error');
-      statusDot.style.background = '#00ff88';
-      statusText.textContent = 'Connected';
-    };
-    function addLogEntry(log) {
-      if (currentFilter !== 'ALL' && log.level !== currentFilter) return;
-      const entry = document.createElement('div');
-      entry.className = 'log-entry';
-      entry.innerHTML = '<div class="log-time">' + new Date(log.timestamp).toLocaleTimeString() + '</div>' +
-        '<div class="log-level ' + log.level + '">' + log.level + '</div>' +
-        '<div class="log-message">' + escapeHtml(log.message) + '</div>' +
-        getMetadataHtml(log);
-      
-      // Insert at the TOP (newest first - reverse chronological)
-      logContainer.insertBefore(entry, logContainer.firstChild);
-      
-      // Remove oldest (at bottom) if too many
-      const logs = logContainer.getElementsByClassName('log-entry');
-      if (logs.length > 500) logs[logs.length - 1].remove();
+    
+    // Poll logs every 2 seconds - client-side processing
+    function pollLogs() {
+      fetch('/monitor/logs?limit=100')
+        .then(r => r.json())
+        .then(data => {
+          statusDot.classList.remove('error');
+          statusDot.style.background = '#00ff88';
+          statusText.textContent = 'Connected';
+          let logs = data.logs;
+          if (currentFilter !== 'ALL') logs = logs.filter(log => log.level === currentFilter);
+          logs = logs.reverse();
+          const newestTimestamp = logs.length > 0 ? logs[0].timestamp : null;
+          if (newestTimestamp !== lastLogTimestamp) {
+            lastLogTimestamp = newestTimestamp;
+            renderLogs(logs);
+          }
+        })
+        .catch(() => {
+          statusDot.classList.add('error');
+          statusDot.style.background = '#ff4466';
+          statusText.textContent = 'Disconnected';
+        });
     }
+    function renderLogs(logs) {
+      const emptyState = logContainer.querySelector('.empty-state');
+      if (logs.length === 0) {
+        if (!emptyState) logContainer.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📡</div><div>No logs yet</div></div>';
+        return;
+      }
+      if (emptyState) emptyState.remove();
+      logContainer.innerHTML = '';
+      logs.forEach(log => {
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = '<div class="log-time">' + new Date(log.timestamp).toLocaleTimeString() + '</div>' +
+          '<div class="log-level ' + log.level + '">' + log.level + '</div>' +
+          '<div class="log-message">' + escapeHtml(log.message) + '</div>' +
+          getMetadataHtml(log);
+        logContainer.appendChild(entry);
+      });
+      if (autoScrollCheckbox.checked) logContainer.scrollTop = 0;
+    }
+    function escapeHtml(text) { const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
     function getMetadataHtml(log) {
       const exclude = ['timestamp', 'level', 'message'];
-      const metadata = Object.entries(log)
-        .filter(([key]) => !exclude.includes(key))
-        .map(([key, value]) => {
-          const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
-          return key + ': ' + displayValue;
-        });
+      const metadata = Object.entries(log).filter(([key]) => !exclude.includes(key)).map(([key, value]) => key + ': ' + (typeof value === 'object' ? JSON.stringify(value) : String(value)));
       if (metadata.length === 0) return '';
       return '<div class="log-metadata">' + metadata.join(' | ') + '</div>';
     }
@@ -679,23 +685,11 @@ function getMonitorHtml() {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         currentFilter = btn.dataset.level;
-        logContainer.innerHTML = '';
-        fetch(\`/monitor/logs?level=\${currentFilter}&limit=100\`)
-          .then(r => r.json())
-          .then(data => {
-            const reversedLogs = data.logs.reverse();
-            reversedLogs.forEach(log => addLogEntry(log));
-          });
+        pollLogs();
       });
     });
-
-    // Initial load - show newest first
-    fetch('/monitor/logs?limit=100')
-      .then(r => r.json())
-      .then(data => {
-        const reversedLogs = data.logs.reverse();
-        reversedLogs.forEach(log => addLogEntry(log));
-      });
+    pollLogs();
+    setInterval(pollLogs, 2000);
   </script>
 </body>
 </html>`;
