@@ -28,25 +28,39 @@ export function monitorRoute() {
         "access-control-allow-origin": "*",
       };
 
-      const encoder = new TextEncoder();
+      // Send initial buffer
+      const logs = getLogBuffer();
+      const initialData = logs.map((log: any) => `data: ${JSON.stringify(log)}\n\n`).join('');
       
-      // Create stream that broadcasts to client
+      // Create readable stream with proper cleanup
+      let intervalId: ReturnType<typeof setInterval> | null = null;
+      
       const stream = new ReadableStream({
         start(controller) {
-          const encoder = new TextEncoder();
-          
-          // Send initial buffer
-          const logs = getLogBuffer();
-          logs.forEach((log: any) => {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(log)}\n\n`));
-          });
+          // Send initial logs
+          if (initialData) {
+            controller.enqueue(initialData);
+          }
 
-          // Keep connection alive
-          const keepAlive = setInterval(() => {
-            controller.enqueue(encoder.encode(": keep-alive\n\n"));
+          // Send keep-alive every 30 seconds
+          intervalId = setInterval(() => {
+            try {
+              controller.enqueue(": keep-alive\n\n");
+            } catch (e) {
+              // Controller closed, cleanup
+              if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+              }
+            }
           }, 30000);
-
-          return () => clearInterval(keepAlive);
+        },
+        cancel() {
+          // Cleanup on client disconnect
+          if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
         },
       });
 
