@@ -3,12 +3,10 @@
 import express from "express";
 import { createServer, Agent } from "http";
 import { Agent as HttpsAgent } from "https";
-import compression from "compression";
 import crypto from "crypto";
 import wretch from "wretch";
 import QueryStringAddon from "wretch/addons/queryString";
 import AbortAddon from "wretch/addons/abort";
-import rateLimit from "express-rate-limit";
 import pick from "./util/pick.js";
 import shouldCompress from "./util/shouldCompress.js";
 import compressImage from "./util/compress.js";
@@ -20,13 +18,6 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 
 // Configuration
 const CONFIG = {
-  CACHE_HEADERS: {
-    "content-encoding": "identity",
-    "cache-control": "private, no-store, no-cache, must-revalidate, max-age=0",
-    pragma: "no-cache",
-    expires: "0",
-    vary: "url, jpeg, grayscale, quality",
-  },
   BYPASS_THRESHOLD: 10240,
   DEFAULT_QUALITY: 40,
   FETCH_HEADERS_TO_PICK: ["cookie", "dnt", "referer", "user-agent", "accept", "accept-language", "origin"],
@@ -37,7 +28,6 @@ const CONFIG = {
   DEFAULT_USER_AGENT: "Mozilla/5.0 (Linux; U; Android 13; zh-CN; PFDM00 Build/TP1A.220905.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/123.0.6312.80 UCBrowser/18.2.6.1452 Mobile Safari/537.36",
 
   // Site-specific referer rules for hotlink protection
-  // Some manga sites require specific referer headers
   REFERER_RULES: {
     "westmanga.blog": "https://westmanga.blog/",
     "wp.com": "https://mangadex.org/",
@@ -45,37 +35,28 @@ const CONFIG = {
     "blogspot.com": "https://www.blogspot.com/",
   },
 
-  // Increased timeout for large manga images (up to 1MB)
-  COMPRESSION_TIMEOUT: 60000, // 60 seconds for large images
-  
-  // Connection pooling limits - prevent socket exhaustion
+  // Connection pooling limits
   HTTP_MAX_SOCKETS: 50,
   HTTP_MAX_FREE_SOCKETS: 10,
   HTTP_TIMEOUT: 30000,
 
-  // Concurrency limits - prevent memory overload
+  // Concurrency limits
   MAX_CONCURRENT_REQUESTS: 100,
 
-  // Rate limiting - prevent abuse
-  RATE_LIMIT_WINDOW_MS: 60000, // 1 minute
-  RATE_LIMIT_MAX_REQUESTS: 30, // 30 requests per minute per IP
+  // Memory monitoring
+  MEMORY_CHECK_INTERVAL: 30000,
 
-  // Memory monitoring - relaxed for manga/webtoon image processing
-  MEMORY_CHECK_INTERVAL: 30000, // Check every 30s
-  MEMORY_CIRCUIT_BREAKER_COOLDOWN: 60000, // 1min cooldown when triggered
-  MEMORY_THRESHOLD_PERCENT: 0.9, // 90% memory threshold for circuit breaker
-
-  // Upstream circuit breaker - prevent cascading failures
-  UPSTREAM_FAILURE_THRESHOLD: 5, // failures before opening circuit
-  UPSTREAM_CIRCUIT_BREAKER_TIMEOUT: 30000, // 30s before half-open
+  // Upstream circuit breaker
+  UPSTREAM_FAILURE_THRESHOLD: 5,
+  UPSTREAM_CIRCUIT_BREAKER_TIMEOUT: 30000,
 
   // Request queue - worker pool for upstream requests
   QUEUE_ENABLED: true,
-  WORKER_COUNT: 3, // Number of concurrent workers
-  WORKER_MIN_DELAY: 500, // Minimum delay between requests per worker (ms)
-  WORKER_MAX_DELAY: 1000, // Maximum delay between requests per worker (ms)
-  QUEUE_MAX_SIZE: 100, // Maximum queue size
-  QUEUE_TIMEOUT: 120000, // Maximum time a request can wait in queue (ms)
+  WORKER_COUNT: 3,
+  WORKER_MIN_DELAY: 500,
+  WORKER_MAX_DELAY: 1000,
+  QUEUE_MAX_SIZE: 100,
+  QUEUE_TIMEOUT: 120000,
 };
 
 // HTTP/HTTPS Agents with connection pooling limits
@@ -96,30 +77,12 @@ const httpsAgent = new HttpsAgent({
   rejectUnauthorized: true,
 });
 
-// Security & Performance middleware
+// Security middleware
 app.disable("x-powered-by");
 
 // Request size limit
 app.use(express.json({ limit: CONFIG.MAX_REQUEST_SIZE }));
 app.use(express.urlencoded({ extended: true, limit: CONFIG.MAX_REQUEST_SIZE }));
-
-// Response compression for JSON responses
-app.use(compression({
-  level: 6,
-  threshold: 1024,
-}));
-
-// Rate limiting middleware
-const limiter = rateLimit({
-  windowMs: CONFIG.RATE_LIMIT_WINDOW_MS,
-  max: CONFIG.RATE_LIMIT_MAX_REQUESTS,
-  message: JSON.stringify({ error: "Too many requests, please try again later" }),
-  standardHeaders: true,
-  legacyHeaders: false,
-  // Use the built-in ipKeyGenerator helper for proper IPv6 support
-  keyGenerator: rateLimit.ipKeyGenerator,
-});
-app.use("/api/", limiter);
 
 // Request timeout middleware
 app.use((req, res, next) => {
@@ -395,22 +358,20 @@ app.use((req, res, next) => {
 });
 
 // Helper functions
-const getCacheHeaders = (custom = {}) => ({ ...CONFIG.CACHE_HEADERS, ...custom });
-
 const createErrorResponse = (statusCode, message, url = null) => ({
   statusCode,
   body: JSON.stringify({ error: message, ...(url && { url }) }),
-  headers: getCacheHeaders({ "content-type": "application/json" }),
+  headers: { "content-type": "application/json" },
 });
 
 const createImageResponse = (buffer, contentType, additionalHeaders = {}) => ({
   statusCode: 200,
   body: buffer,
-  headers: getCacheHeaders({
+  headers: {
     "content-type": contentType,
     "content-length": buffer.length,
     ...additionalHeaders,
-  }),
+  },
 });
 
 const parseQueryParams = (queryParams) => {
@@ -739,7 +700,7 @@ const shouldBypassCompression = (contentLength, contentType, isWebp) => {
 
 const handleImageRequest = async (event, abortSignal) => {
   const params = parseQueryParams(event.queryStringParameters);
-  if (params.healthCheck) return { statusCode: 200, body: "bandwidth-hero-proxy", headers: getCacheHeaders() };
+  if (params.healthCheck) return { statusCode: 200, body: "bandwidth-hero-proxy" };
 
   const { imageUrl: rawUrl, isWebp, isGrayscale, quality } = params;
   const imageUrl = cleanImageUrl(rawUrl);
