@@ -256,15 +256,26 @@ function getMonitorHtml() {
       const exclude = ['timestamp', 'level', 'message'];
       const metadata = Object.entries(log)
         .filter(([key]) => !exclude.includes(key))
-        .map(([key, value]) => {\${key}: \${typeof value === 'object' ? JSON.stringify(value) : String(value)});
+        .map(([key, value]) => {
+          const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+          return key + ': ' + displayValue;
+        });
       if (metadata.length === 0) return '';
-      return \`<div class="log-metadata">\${metadata.join(' | ')}</div>\`;
+      return '<div class="log-metadata">' + metadata.join(' | ') + '</div>';
     }
     function updateStats() {
       const logs = logContainer.getElementsByClassName('log-entry');
-      document.getElementById('totalLogs').textContent = logs.length;
-      document.getElementById('errorCount').textContent = Array.from(logs).filter(l => l.querySelector('.log-level.ERROR')).length;
-      document.getElementById('warnCount').textContent = Array.from(logs).filter(l => l.querySelector('.log-level.WARN')).length;
+      const total = logs.length;
+      const errors = Array.from(logs).filter(l => l.querySelector('.log-level.ERROR')).length;
+      const warns = Array.from(logs).filter(l => l.querySelector('.log-level.WARN')).length;
+      
+      const totalEl = document.getElementById('totalLogs');
+      const errorEl = document.getElementById('errorCount');
+      const warnEl = document.getElementById('warnCount');
+      
+      if (totalEl) totalEl.textContent = total.toString();
+      if (errorEl) errorEl.textContent = errors.toString();
+      if (warnEl) warnEl.textContent = warns.toString();
     }
     function clearLogs() { logContainer.innerHTML = ''; updateStats(); }
     document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -275,12 +286,20 @@ function getMonitorHtml() {
         logContainer.innerHTML = '';
         fetch(\`/monitor/logs?level=\${currentFilter}&limit=100\`)
           .then(r => r.json())
-          .then(data => { data.logs.forEach(log => addLogEntry(log)); updateStats(); });
+          .then(data => { 
+            data.logs.forEach(log => addLogEntry(log)); 
+            updateStats();
+          });
       });
     });
+    
+    // Initial load with stats update
     fetch('/monitor/logs?limit=100')
       .then(r => r.json())
-      .then(data => { data.logs.forEach(log => addLogEntry(log)); updateStats(); });
+      .then(data => { 
+        data.logs.forEach(log => addLogEntry(log)); 
+        updateStats();
+      });
   </script>
 </body>
 </html>`;
