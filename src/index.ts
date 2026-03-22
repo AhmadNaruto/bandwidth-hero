@@ -4,7 +4,6 @@
 import { Elysia } from "elysia";
 import { cors } from "@elysiajs/cors";
 import logger, { setLogCallback } from "./utils/logger.js";
-import { rateLimitPlugin } from "./middleware/rate-limit.js";
 import { loggingPlugin } from "./middleware/logging.js";
 import { RequestQueue } from "./middleware/queue.js";
 import { healthRoutes } from "./routes/health.js";
@@ -63,9 +62,6 @@ const app = new Elysia({ name: "bandwidth-hero" })
     })
   )
 
-  // Rate limiting / concurrency control
-  .use(rateLimitPlugin({ maxConcurrent: CONFIG.MAX_CONCURRENT_REQUESTS }))
-
   // Request logging
   .use(loggingPlugin())
 
@@ -75,7 +71,7 @@ const app = new Elysia({ name: "bandwidth-hero" })
   // Health check routes
   .use(healthRoutes({
     queue: requestQueue,
-    getActiveRequests: (): number => 0, // Will be set by rate-limit plugin
+    getActiveRequests: () => 0,
   }))
 
   // Queue status route
@@ -143,7 +139,6 @@ const server = app.listen(CONFIG.PORT, () => {
       minDelay: `${CONFIG.WORKER_MIN_DELAY}ms`,
       maxDelay: `${CONFIG.WORKER_MAX_DELAY}ms`,
     },
-    maxConcurrentRequests: CONFIG.MAX_CONCURRENT_REQUESTS,
   });
 });
 

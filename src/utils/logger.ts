@@ -158,6 +158,7 @@ export class Logger {
         timestamp: new Date().toISOString(),
         level: "INFO" as const,
         message: "Image Zip",
+        url: this.truncateUrl(url, 80),
         savings: this.formatBytes(bytesSaved || 0),
         percent: originalSize && compressedSize
           ? `${((originalSize - compressedSize) / originalSize * 100).toFixed(1)}%`
