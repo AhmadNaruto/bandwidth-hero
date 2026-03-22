@@ -662,14 +662,17 @@ function getMonitorHtml() {
       if (currentFilter !== 'ALL' && log.level !== currentFilter) return;
       const entry = document.createElement('div');
       entry.className = 'log-entry';
-      entry.innerHTML = \`<div class="log-time">\${new Date(log.timestamp).toLocaleTimeString()}</div>
-        <div class="log-level \${log.level}">\${log.level}</div>
-        <div class="log-message">\${log.message}</div>
-        \${getMetadataHtml(log)}\`;
-      logContainer.appendChild(entry);
-      if (autoScrollCheckbox.checked) logContainer.scrollTop = logContainer.scrollHeight;
+      entry.innerHTML = '<div class="log-time">' + new Date(log.timestamp).toLocaleTimeString() + '</div>' +
+        '<div class="log-level ' + log.level + '">' + log.level + '</div>' +
+        '<div class="log-message">' + escapeHtml(log.message) + '</div>' +
+        getMetadataHtml(log);
+      
+      // Insert at the TOP (newest first - reverse chronological)
+      logContainer.insertBefore(entry, logContainer.firstChild);
+      
+      // Remove oldest (at bottom) if too many
       const logs = logContainer.getElementsByClassName('log-entry');
-      if (logs.length > 500) logs[0].remove();
+      if (logs.length > 500) logs[logs.length - 1].remove();
     }
     function getMetadataHtml(log) {
       const exclude = ['timestamp', 'level', 'message'];
@@ -747,11 +750,13 @@ function getMonitorHtml() {
       });
     });
     
-    // Initial load with stats update
+    // Initial load with stats update - show newest first
     fetch('/monitor/logs?limit=100')
       .then(r => r.json())
-      .then(data => { 
-        data.logs.forEach(log => addLogEntry(log)); 
+      .then(data => {
+        // Reverse to show newest logs at the top
+        const reversedLogs = data.logs.reverse();
+        reversedLogs.forEach(log => addLogEntry(log));
         updateStats();
       });
   </script>
