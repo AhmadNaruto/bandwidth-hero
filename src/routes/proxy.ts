@@ -37,10 +37,34 @@ const parseQueryParams = (query: Record<string, string>) => {
   };
 };
 
+const isPrivateIP = (hostname: string): boolean => {
+  // Basic SSRF protection: block localhost and private IP ranges
+  const privatePatterns = [
+    /^localhost$/i,
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2[0-9]|3[01])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^::1$/,
+    /^fc00:/,
+    /^fe80:/
+  ];
+  return privatePatterns.some(pattern => pattern.test(hostname));
+};
+
 const cleanImageUrl = (url: string): string | null => {
   if (!url || typeof url !== "string") return null;
   try {
-    return new URL(url.trim()).href;
+    const parsedUrl = new URL(url.trim());
+    
+    // SSRF protection: check for private IPs/hostnames
+    if (isPrivateIP(parsedUrl.hostname)) {
+      logger.warn("Blocked potential SSRF request", { hostname: parsedUrl.hostname });
+      return null;
+    }
+    
+    return parsedUrl.href;
   } catch {
     return null;
   }
@@ -60,7 +84,6 @@ const createImageResponse = (
     ...additionalHeaders,
   };
 
-  // Return Response object for proper binary handling
   return new Response(buffer, { 
     headers,
     status: 200,
@@ -82,6 +105,7 @@ export function proxyRoutes(options: ProxyOptions) {
     .get("/index", async ({ query, set, request }): Promise<any> => {
       const startTime = Date.now();
       const abortController = new AbortController();
+      let release: (() => void) | null = null;
 
       const timeout = setTimeout(() => {
         abortController.abort();
@@ -101,7 +125,7 @@ export function proxyRoutes(options: ProxyOptions) {
         if (!imageUrl) {
           clearTimeout(timeout);
           set.status = 400;
-          return { error: "Invalid image URL provided" };
+          return { error: "Invalid or restricted image URL provided" };
         }
 
         const urlHash = generateUrlHash(imageUrl);
@@ -114,9 +138,9 @@ export function proxyRoutes(options: ProxyOptions) {
           clientHeaders["x-real-ip"] ||
           "unknown";
 
-        // Wait in queue
+        // Wait in queue and get release function
         if (options.queue) {
-          await options.queue.enqueue(abortController.signal);
+          release = await options.queue.enqueue(abortController.signal);
         }
 
         // Fetch upstream image
@@ -149,9 +173,7 @@ export function proxyRoutes(options: ProxyOptions) {
 
           logger.logBypass({ url: imageUrl, size: contentLength, reason });
 
-          // If upstream returned non-image (e.g., 403 HTML error), return error to client
           if (!contentType.startsWith("image/")) {
-            clearTimeout(timeout);
             set.status = 502;
             set.headers["content-type"] = "application/json";
             return {
@@ -160,15 +182,6 @@ export function proxyRoutes(options: ProxyOptions) {
               contentType,
             };
           }
-
-          // Bypass compression but still send the image to client
-          clearTimeout(timeout);
-          logger.debug("Sending bypassed image", {
-            url: imageUrl,
-            size: contentLength,
-            contentType,
-            reason,
-          });
 
           return new Response(buffer, {
             status: 200,
@@ -214,7 +227,6 @@ export function proxyRoutes(options: ProxyOptions) {
           format: compressHeaders["content-type"] || (isWebp ? "image/avif" : "image/jpeg"),
         });
 
-        clearTimeout(timeout);
         return createImageResponse(output, compressHeaders["content-type"], {
           ...sanitizeResponseHeaders(upstreamHeaders),
           ...compressHeaders,
@@ -222,7 +234,6 @@ export function proxyRoutes(options: ProxyOptions) {
           "x-url-hash": urlHash,
         });
       } catch (error) {
-        clearTimeout(timeout);
         const err = error as Error;
 
         if (err.name === "AbortError" || err.message.includes("timed out")) {
@@ -239,6 +250,10 @@ export function proxyRoutes(options: ProxyOptions) {
         set.status = 500;
         set.headers["content-type"] = "application/json";
         return { error: err.message };
+      } finally {
+        clearTimeout(timeout);
+        // CRITICAL: Always release the worker back to the queue
+        if (release) release();
       }
     }, {
       query: t.Object({
@@ -249,6 +264,12 @@ export function proxyRoutes(options: ProxyOptions) {
         l: t.Optional(t.String()),
       }),
     });
+}
+
+export function healthRoutes(options: { queue: RequestQueue, getActiveRequests: () => number }) {
+  return new Elysia()
+    .get("/health", () => ({ status: "ok" }))
+    .get("/ready", () => ({ status: "ready" }));
 }
 
 export default proxyRoutes;

@@ -1,7 +1,7 @@
 // Queue management for upstream requests
 
 interface QueueEntry {
-  resolve: () => void;
+  resolve: (release: () => void) => void;
   reject: (error: Error) => void;
   addedAt: number;
   abortSignal: AbortSignal;
@@ -60,12 +60,16 @@ export class RequestQueue {
     }
   }
 
-  async enqueue(abortSignal: AbortSignal): Promise<void> {
+  /**
+   * Enqueue a request and wait for an available worker.
+   * Returns a release function that MUST be called when the work is finished.
+   */
+  async enqueue(abortSignal: AbortSignal): Promise<() => void> {
     if (!this.options.enabled) {
-      return Promise.resolve();
+      return () => {};
     }
 
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<() => void>((resolve, reject) => {
       if (this.queue.length >= this.options.queueMaxSize) {
         this.metrics.totalRejected++;
         reject(new Error("Queue full - too many requests"));
@@ -90,7 +94,7 @@ export class RequestQueue {
       };
 
       this.queue.push(queueEntry);
-      this.assignToWorker();
+      this.processQueue();
     });
   }
 
@@ -98,43 +102,34 @@ export class RequestQueue {
     return this.workers.find((worker) => !worker.busy);
   }
 
-  private async assignToWorker(): Promise<void> {
+  private async processQueue(): Promise<void> {
     if (this.queue.length === 0) return;
 
     const worker = this.findAvailableWorker();
     if (!worker) return;
 
-    const entry = this.queue[0];
-
-    if (entry.abortSignal.aborted) {
-      this.queue.shift();
-      clearTimeout(entry.timeoutId);
+    // Get the first entry that hasn't been aborted
+    let entryIndex = 0;
+    while (entryIndex < this.queue.length && this.queue[entryIndex].abortSignal.aborted) {
+      const abortedEntry = this.queue.splice(entryIndex, 1)[0];
+      clearTimeout(abortedEntry.timeoutId);
       this.metrics.totalAborted++;
-      entry.reject(new Error("Request aborted"));
-      return;
+      abortedEntry.reject(new Error("Request aborted"));
     }
 
-    const waitTime = Date.now() - entry.addedAt;
-    if (waitTime >= this.options.queueTimeout) {
-      this.queue.shift();
-      clearTimeout(entry.timeoutId);
-      this.metrics.totalTimeouts++;
-      entry.reject(new Error("Queue timeout"));
-      return;
-    }
+    if (this.queue.length === 0) return;
 
+    const entry = this.queue.shift()!;
+    clearTimeout(entry.timeoutId);
+
+    // Wait for random delay between requests to simulate human-like or throttled behavior
     const timeSinceLastRequest = Date.now() - worker.lastRequestTime;
-    const minDelay = this.options.workerMinDelay;
-    const maxDelay = this.options.workerMaxDelay;
-    const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+    const randomDelay = Math.floor(Math.random() * (this.options.workerMaxDelay - this.options.workerMinDelay + 1)) + this.options.workerMinDelay;
 
     if (timeSinceLastRequest < randomDelay) {
       const sleepTime = randomDelay - timeSinceLastRequest;
       await new Promise((resolve) => setTimeout(resolve, sleepTime));
     }
-
-    this.queue.shift();
-    clearTimeout(entry.timeoutId);
 
     worker.busy = true;
     worker.lastRequestTime = Date.now();
@@ -148,19 +143,20 @@ export class RequestQueue {
         this.metrics.totalProcessed
     );
 
-    entry.resolve();
-
-    setTimeout(() => {
+    // Provide a release function to the caller
+    const release = () => {
       worker.busy = false;
       worker.requestsProcessed++;
-      this.assignToWorker();
-    }, 100);
+      this.processQueue(); // Check for next items in queue
+    };
 
-    this.assignToWorker();
+    entry.resolve(release);
+    
+    // Check if more workers can be assigned
+    this.processQueue();
   }
 
   getStatus() {
-    const busyWorkers = this.workers.filter((w) => w.busy).length;
     return {
       queue: {
         size: this.queue.length,
@@ -180,14 +176,6 @@ export class RequestQueue {
       metrics: { ...this.metrics },
       enabled: this.options.enabled,
     };
-  }
-
-  getMetrics() {
-    return { ...this.metrics };
-  }
-
-  getActiveWorkers(): number {
-    return this.workers.filter((w) => w.busy).length;
   }
 }
 
